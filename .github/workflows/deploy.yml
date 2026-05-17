@@ -15,6 +15,20 @@ jobs:
         with:
           node-version: '22'
       
+      - name: Detect latest version and copy to src/App.jsx
+        run: |
+          mkdir -p versions
+          LATEST=$(ls versions/lottery-app-v*.jsx 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$LATEST" ]; then
+            echo "❌ No version file found in versions/ folder"
+            echo "Please upload lottery-app-vN.jsx to versions/ folder"
+            exit 1
+          fi
+          echo "✅ Using version file: $LATEST"
+          cp "$LATEST" src/App.jsx
+          echo "Copied to src/App.jsx"
+          head -5 src/App.jsx
+      
       - name: Install dependencies
         run: npm install
       
