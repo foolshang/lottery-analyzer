@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "cd /d/Projects/lottery-analyzer && if ! git diff --quiet HEAD -- CLAUDE_HISTORY.md 2>/dev/null; then git add CLAUDE_HISTORY.md && git commit -m \"Update CLAUDE_HISTORY $(date +%Y-%m-%d)\" && git push origin main 2>/dev/null && printf '{\"systemMessage\":\"✓ CLAUDE_HISTORY.md push GitHub แล้ว\"}'; else printf '{\"systemMessage\":\"⚠ CLAUDE_HISTORY.md ยังไม่อัพเดต session นี้\"}'; fi",
+            "timeout": 30,
+            "statusMessage": "กำลัง push CLAUDE_HISTORY ไป GitHub..."
+          }
+        ]
+      }
+    ]
+  }
+}
