@@ -684,6 +684,32 @@ fi
 - Path บน Git Bash: `/d/Projects/lottery-analyzer` (ไม่ใช่ `D:\`)
 - `git diff --quiet HEAD -- file` exit 0=ไม่มีเปลี่ยน, exit 1=มีเปลี่ยน
 
+<a name="session-7"></a>
+# Session 7 (2026-06-11): เขียน lockedHints เข้า Firestore โดยตรง
+
+## หัวข้อ: ใส่ข้อมูลเสริม hints-input-66-68.txt เข้า Firestore
+**[ผู้ใช้]** ต้องการใส่ hints-input-66-68.txt เป็น lockedHints + ล็อก เขียนเข้า Firestore โดยตรง
+
+**[Claude]** ไม่จำเป็นต้องสร้างไฟล์ script — รันคำสั่ง `node -e` ตรงๆ ครั้งเดียวได้เลย  
+ใช้ Firestore REST API (PATCH + updateMask) ไม่ต้อง firebase-admin ไม่ต้อง serviceAccountKey  
+เพราะ Firestore rules เปิด `write: if true` อยู่แล้ว
+
+**คำสั่งที่รัน:**
+```bash
+node -e "...อ่าน hints-input-66-68.txt → parse → PATCH Firestore REST API..."
+```
+ผลลัพธ์: `parsed: 213 hints` → `✓ Done`
+
+**บทเรียน:**
+- Firestore REST API + API key เพียงพอสำหรับ rules ที่เปิด `write: if true`
+- ไม่ต้องสร้างไฟล์ script ถ้าใช้ครั้งเดียว
+- `updateMask.fieldPaths=lockedHints` = merge เฉพาะ field นั้น ไม่ทับ field อื่น
+
+## Feedback ที่ได้รับ (สำคัญ)
+- **"ทำไมถามก่อนทำเยอะจัง"** → ยืนยันก่อนเฉพาะโค้ด งานอื่นทำเลย
+- **"ตอบก่อน รอสั่งให้ทำก่อนค่อยทำ"** → อธิบายแผนก่อน รอ "ทำเลย"
+- **"หลังคำสั่งให้ทำ ไม่ต้องขออนุญาตอะไรอีก ทำไปจนเสร็จ"** → พอได้ยิน "ทำเลย" ให้ทำจนเสร็จไม่หยุด
+
 ---
 
 # ไฟล์ที่เกี่ยวข้อง
@@ -705,4 +731,5 @@ fi
 *สร้างโดยอ่าน transcript 4 session: 2026-05-10, 2026-05-14, 2026-05-25, 2026-06-06*
 *อัปเดต Session 5 (2026-06-09): Claude Code integration + ดึงข้อมูลเสริม myhora*
 *อัปเดต Session 6 (2026-06-11): Git setup + GitHub + Stop hook auto-commit CLAUDE_HISTORY*
+*อัปเดต Session 7 (2026-06-11): เขียน lockedHints 213 ชุดเข้า Firestore โดยตรง*
 *รวมทุกการสนทนา + ถามตอบ + การแก้ไขโค้ดทุกเวอร์ชัน*
