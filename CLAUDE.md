@@ -1,6 +1,6 @@
 # CLAUDE.md — Lottery Analyzer Project Instructions
 
-@CLAUDE_HISTORY.md
+@Lottery-Analyzer-history.md
 
 ## กฎการทำงาน (ต้องปฏิบัติทุก session)
 
@@ -10,9 +10,9 @@
 4. **สร้าง 2 ไฟล์** เสมอ: lottery-app-vN.jsx + lottery-reference.md
 5. **แสดง version** ที่ header เว็บ ("ADAPTIVE PROBABILITY ENGINE vN")
 
-## บันทึก CLAUDE_HISTORY.md (สำคัญมาก)
+## บันทึก Lottery-Analyzer-history.md (สำคัญมาก)
 
-**ก่อนจบ session ทุกครั้ง** ต้องเพิ่มสรุปลงใน `CLAUDE_HISTORY.md` ตามรูปแบบนี้:
+**ก่อนจบ session ทุกครั้ง** ต้องเพิ่มสรุปลงใน `Lottery-Analyzer-history.md` ตามรูปแบบนี้:
 
 ```
 <a name="session-N"></a>
@@ -26,7 +26,7 @@
 - รายการเปลี่ยนแปลง
 ```
 
-หลังเพิ่มสรุปแล้ว Stop hook จะ auto-commit + push ไป GitHub อัตโนมัติ
+หลังเพิ่มสรุปแล้ว Stop hook จะ auto-commit + push `Lottery-Analyzer-history.md` ไป GitHub อัตโนมัติ
 
 ## Deploy Workflow (GitHub Actions)
 
@@ -38,6 +38,7 @@
 
 - `versions/lottery-app-vN.jsx` — โค้ดแต่ละ version
 - `src/App.jsx` — ไฟล์ที่ GitHub Actions copy จาก versions/
-- `CLAUDE_HISTORY.md` — ประวัติการพัฒนาทุก session
+- `Lottery-Analyzer-history.md` — ประวัติการพัฒนาทุก session
+- `PLAN.md` — แผนปฏิบัติการสำหรับ Claude Code (ฟีเจอร์สี + ระบบ Discord)
 - `write-hints.js` — script เขียน lockedHints เข้า Firestore
-- `hints-input-66-68.txt` — ข้อมูลเสริม 213 ชุดจาก myhora ปี 66-68
+- `hints-input-66-69.txt` — ข้อมูลเสริม 246 ชุดจาก myhora ปี 66-69

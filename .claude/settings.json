@@ -6,9 +6,9 @@
           {
             "type": "command",
             "shell": "bash",
-            "command": "cd /d/Projects/lottery-analyzer && if ! git diff --quiet HEAD -- CLAUDE_HISTORY.md 2>/dev/null; then git add CLAUDE_HISTORY.md && git commit -m \"Update CLAUDE_HISTORY $(date +%Y-%m-%d)\" && git push origin main 2>/dev/null && printf '{\"systemMessage\":\"✓ CLAUDE_HISTORY.md push GitHub แล้ว\"}'; else printf '{\"systemMessage\":\"⚠ CLAUDE_HISTORY.md ยังไม่อัพเดต session นี้\"}'; fi",
+            "command": "cd /d/Projects/lottery-analyzer && if ! git diff --quiet HEAD -- Lottery-Analyzer-history.md 2>/dev/null; then git add Lottery-Analyzer-history.md && git commit -m \"Update Lottery-Analyzer-history $(date +%Y-%m-%d)\" && git push origin main 2>/dev/null && printf '{\"systemMessage\":\"✓ Lottery-Analyzer-history.md push GitHub แล้ว\"}'; else printf '{\"systemMessage\":\"⚠ Lottery-Analyzer-history.md ยังไม่อัพเดต session นี้\"}'; fi",
             "timeout": 30,
-            "statusMessage": "กำลัง push CLAUDE_HISTORY ไป GitHub..."
+            "statusMessage": "กำลัง push Lottery-Analyzer-history ไป GitHub..."
           }
         ]
       }
