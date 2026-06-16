@@ -112,11 +112,19 @@ async function main() {
   };
   const newHistory = [...history, histEntry].slice(-50);
 
+  // Firestore ไม่รองรับ array ซ้อน array → flatten prizes ก่อนเขียน
+  const prizesFlat = {
+    full:   prizes.full,
+    front3: prizes.front3.map(d => d.join('')),
+    back3:  prizes.back3.map(d => d.join('')),
+    back2:  prizes.back2.join(''),
+  };
+
   await ref.set({
     data:             newData,
     weights:          newWeights,
     history:          newHistory,
-    lastResults:      { prizes, cmp, drawDate: prizes.drawDateStr, prediction: lastPred },
+    lastResults:      { prizes: prizesFlat, cmp, drawDate: prizes.drawDateStr, prediction: lastPred },
     lastPredictions:  null,
     updatedAt:        new Date().toISOString(),
   }, { merge: true });

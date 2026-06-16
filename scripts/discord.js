@@ -57,9 +57,9 @@ async function sendResults(stored) {
   const back3Win  = cmp?.back3Results?.some(r => r.win);
   const back2Win  = cmp?.back2Result?.win;
 
-  const f3str = prizes.front3.map(d => d.join('')).join(', ') || '-';
-  const b3str = prizes.back3.map(d => d.join('')).join(', ') || '-';
-  const b2str = prizes.back2.join('') || '-';
+  const f3str = (prizes.front3 || []).join(', ') || '-';
+  const b3str = (prizes.back3  || []).join(', ') || '-';
+  const b2str = prizes.back2 || '-';
 
   const color = hits >= 5 ? 0xfbbf24 : hits >= 3 ? 0x16a34a : hits >= 1 ? 0xf59e0b : 0x6b7280;
 
