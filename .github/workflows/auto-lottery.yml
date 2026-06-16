@@ -7,16 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'predict = ทำนาย, results = ตรวจผล'
+        description: 'predict หรือ results'
         required: true
-        type: choice
-        options:
-          - predict
-          - results
+        default: 'predict'
 
 jobs:
   run:
-    name: Auto Lottery (${{ github.event.inputs.mode || github.event.schedule }})
+    name: Auto Lottery
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
