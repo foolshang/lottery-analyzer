@@ -1,0 +1,9 @@
+{
+  "name": "lottery-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Automation scripts — requires Node.js 22+",
+  "dependencies": {
+    "firebase-admin": "^13.4.0"
+  }
+}

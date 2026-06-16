@@ -1,0 +1,107 @@
+name: Auto Lottery
+
+on:
+  schedule:
+    - cron: '0 2 * * *'    # 09:00 ICT — ทำนาย (ถ้าพรุ่งนี้เป็นวันออกหวย)
+    - cron: '0 10 * * *'   # 17:00 ICT — ตรวจผล (ถ้าวันนี้เป็นวันออกหวย)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'predict = ทำนาย, results = ตรวจผล'
+        required: true
+        type: choice
+        options:
+          - predict
+          - results
+
+jobs:
+  run:
+    name: Auto Lottery (${{ github.event.inputs.mode || github.event.schedule }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install script dependencies
+        run: npm install --prefix scripts
+
+      # ── ตัดสินใจ mode ──────────────────────────────────────────
+      - name: Determine mode
+        id: mode
+        run: |
+          MANUAL="${{ github.event.inputs.mode }}"
+          if [ -n "$MANUAL" ]; then
+            echo "mode=$MANUAL" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 2 * * *" ]; then
+            echo "mode=predict" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=results" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── เช็คปฏิทิน (predict) ───────────────────────────────────
+      - name: Check: พรุ่งนี้วันออกหวยไหม?
+        if: steps.mode.outputs.mode == 'predict'
+        id: check_predict
+        run: |
+          TOMORROW=$(TZ='Asia/Bangkok' date -d 'tomorrow' '+%Y-%m-%d')
+          echo "tomorrow=$TOMORROW"
+          if grep -qF "$TOMORROW" lottery-dates.txt; then
+            echo "run=true"  >> "$GITHUB_OUTPUT"
+            echo "drawDate=$TOMORROW" >> "$GITHUB_OUTPUT"
+            echo "✓ พรุ่งนี้ ($TOMORROW) เป็นวันออกหวย"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "ข้าม — $TOMORROW ไม่ใช่วันออกหวย"
+          fi
+
+      # ── เช็คปฏิทิน (results) ───────────────────────────────────
+      - name: Check: วันนี้วันออกหวยไหม?
+        if: steps.mode.outputs.mode == 'results'
+        id: check_results
+        run: |
+          TODAY=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
+          echo "today=$TODAY"
+          if grep -qF "$TODAY" lottery-dates.txt; then
+            echo "run=true"  >> "$GITHUB_OUTPUT"
+            echo "✓ วันนี้ ($TODAY) เป็นวันออกหวย"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "ข้าม — $TODAY ไม่ใช่วันออกหวย"
+          fi
+
+      # ── PREDICT flow ────────────────────────────────────────────
+      - name: Fetch hints จาก kapook
+        if: steps.mode.outputs.mode == 'predict' && steps.check_predict.outputs.run == 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/fetch-hints.js
+
+      - name: คำนวณทำนาย
+        if: steps.mode.outputs.mode == 'predict' && steps.check_predict.outputs.run == 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/predict.js
+
+      - name: ส่งทำนายเข้า Discord
+        if: steps.mode.outputs.mode == 'predict' && steps.check_predict.outputs.run == 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: node scripts/discord.js predict
+
+      # ── RESULTS flow ────────────────────────────────────────────
+      - name: Fetch ผลจาก myhora + learning
+        if: steps.mode.outputs.mode == 'results' && steps.check_results.outputs.run == 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/fetch-results.js
+
+      - name: ส่งผลตรวจเข้า Discord
+        if: steps.mode.outputs.mode == 'results' && steps.check_results.outputs.run == 'true'
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: node scripts/discord.js results
