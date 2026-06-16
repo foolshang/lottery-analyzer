@@ -2,12 +2,12 @@ name: Auto Lottery
 
 on:
   schedule:
-    - cron: '0 2 * * *'    # 09:00 ICT — ทำนาย (ถ้าพรุ่งนี้เป็นวันออกหวย)
-    - cron: '0 10 * * *'   # 17:00 ICT — ตรวจผล (ถ้าวันนี้เป็นวันออกหวย)
+    - cron: '0 2 * * *'
+    - cron: '0 10 * * *'
   workflow_dispatch:
     inputs:
       mode:
-        description: 'predict หรือ results'
+        description: 'predict or results'
         required: true
         default: 'predict'
 
@@ -25,7 +25,6 @@ jobs:
       - name: Install script dependencies
         run: npm install --prefix scripts
 
-      # ── ตัดสินใจ mode ──────────────────────────────────────────
       - name: Determine mode
         id: mode
         run: |
@@ -38,65 +37,57 @@ jobs:
             echo "mode=results" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── เช็คปฏิทิน (predict) ───────────────────────────────────
-      - name: Check: พรุ่งนี้วันออกหวยไหม?
+      - name: Check - is tomorrow a lottery draw day?
         if: steps.mode.outputs.mode == 'predict'
         id: check_predict
         run: |
           TOMORROW=$(TZ='Asia/Bangkok' date -d 'tomorrow' '+%Y-%m-%d')
           echo "tomorrow=$TOMORROW"
           if grep -qF "$TOMORROW" lottery-dates.txt; then
-            echo "run=true"  >> "$GITHUB_OUTPUT"
+            echo "run=true" >> "$GITHUB_OUTPUT"
             echo "drawDate=$TOMORROW" >> "$GITHUB_OUTPUT"
-            echo "✓ พรุ่งนี้ ($TOMORROW) เป็นวันออกหวย"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "ข้าม — $TOMORROW ไม่ใช่วันออกหวย"
           fi
 
-      # ── เช็คปฏิทิน (results) ───────────────────────────────────
-      - name: Check: วันนี้วันออกหวยไหม?
+      - name: Check - is today a lottery draw day?
         if: steps.mode.outputs.mode == 'results'
         id: check_results
         run: |
           TODAY=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
           echo "today=$TODAY"
           if grep -qF "$TODAY" lottery-dates.txt; then
-            echo "run=true"  >> "$GITHUB_OUTPUT"
-            echo "✓ วันนี้ ($TODAY) เป็นวันออกหวย"
+            echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "ข้าม — $TODAY ไม่ใช่วันออกหวย"
           fi
 
-      # ── PREDICT flow ────────────────────────────────────────────
-      - name: Fetch hints จาก kapook
+      - name: Fetch hints from kapook
         if: steps.mode.outputs.mode == 'predict' && steps.check_predict.outputs.run == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node scripts/fetch-hints.js
 
-      - name: คำนวณทำนาย
+      - name: Run prediction
         if: steps.mode.outputs.mode == 'predict' && steps.check_predict.outputs.run == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node scripts/predict.js
 
-      - name: ส่งทำนายเข้า Discord
+      - name: Send prediction to Discord
         if: steps.mode.outputs.mode == 'predict' && steps.check_predict.outputs.run == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: node scripts/discord.js predict
 
-      # ── RESULTS flow ────────────────────────────────────────────
-      - name: Fetch ผลจาก myhora + learning
+      - name: Fetch results from myhora
         if: steps.mode.outputs.mode == 'results' && steps.check_results.outputs.run == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node scripts/fetch-results.js
 
-      - name: ส่งผลตรวจเข้า Discord
+      - name: Send results to Discord
         if: steps.mode.outputs.mode == 'results' && steps.check_results.outputs.run == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
