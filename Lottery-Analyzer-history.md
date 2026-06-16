@@ -16,8 +16,10 @@
 6. [Session 4: v20-v25 — GitHub Actions + Sync + Log](#session-4)
 7. [Session 5: Claude Code Integration + ดึง myhora](#session-5)
 8. [Session 6: ออกแบบฟีเจอร์สี + ระบบอัตโนมัติ Discord](#session-6)
-9. [สรุประบบทั้งหมด](#สรุประบบ)
-10. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
+9. [Session 7: Phase B2-B5 — ระบบอัตโนมัติ Discord](#session-7)
+10. [Session 8: ทดสอบจริง + แก้บั๊ก Workflow/Firestore/Discord](#session-8)
+11. [สรุประบบทั้งหมด](#สรุประบบ)
+12. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
 
 ---
 
@@ -775,31 +777,73 @@ scripts/
 
 ---
 
-## 📌 สำหรับ Claude Code: อ่าน PLAN.md เพื่อเริ่มงาน
+<a name="session-8"></a>
+# Session 8 (2026-06-16): ทดสอบจริง + แก้บั๊ก Workflow/Firestore/Discord
 
-งานถัดไปทั้งหมดอยู่ในไฟล์ **`PLAN.md`** (แผนปฏิบัติการทีละขั้น) ครอบคลุม:
-- ก้อน A: ฟีเจอร์สีตามความถี่ + lockedHints เป็นข้อมูลหลัก
-- ก้อน B: ระบบอัตโนมัติ (แยก engine, ดึงข้อมูล, GitHub Actions, Discord)
+## หัวข้อ: push + ทดสอบระบบอัตโนมัติครบวงจร
 
-Claude Code ควรอ่าน PLAN.md ทั้งหมดก่อนเริ่ม แล้วทำตามลำดับขั้นที่ระบุ โดยทำงานต่อเนื่องจนเสร็จงานทั้งหมด แล้วค่อยสรุปทีเดียวตอนจบ (ไม่หยุดถาม/ไม่หยุดสรุปทีละขั้นหรือทีละ phase)
+**[ผู้ใช้]** "ทำต่อเลย"
+
+**[Claude Code]** push commits ที่ค้างอยู่ local (4 commits) ขึ้น GitHub → deploy v26 อัตโนมัติ
+
+## บั๊กที่พบและแก้ไข
+
+### 1. YAML Parse Error — workflow ไม่รู้จัก `workflow_dispatch`
+**สาเหตุ:** auto-lottery.yml มี Thai characters + Unicode `─` ในบรรทัด comment และ `type: choice` ในส่วน inputs ทำให้ GitHub's YAML parser ล้มเหลว (0 jobs, "workflow file issue")
+**แก้:** เขียน YAML ใหม่ทั้งหมดโดยไม่มี Thai/Unicode พิเศษ + เปลี่ยน `type: choice` → `default: 'predict'` plain string
+
+### 2. เพิ่ม `force` input — ข้าม calendar check สำหรับ manual test
+**[ผู้ใช้]** ต้องการทดสอบทันทีโดยไม่รองวันออกหวย
+**แก้:** เพิ่ม input `force=true/false` → ถ้า force=true ข้าม lottery-dates.txt check
+**วิธีใช้:** GitHub → Actions → Run workflow → force=true
+
+### 3. PERMISSION_DENIED เขียน Firestore
+**สาเหตุ:** service account `firebase-adminsdk-fbsvc@lottary-d8ebd.iam.gserviceaccount.com` ไม่มีสิทธิ์ Firestore (มีแค่ firebase.auth.admin + hosting.admin + iam.serviceAccountUser + serviceusage.apiKeysViewer)
+**แก้:** เพิ่ม `roles/datastore.user` ผ่าน `gcloud projects add-iam-policy-binding` → propagate ~1 นาที
+
+### 4. Firestore nested array error
+**สาเหตุ:** `lastResults.prizes.front3 = [[4,3,4],[7,5,8]]` — Firestore ไม่รองรับ array ซ้อน array
+**แก้:** flatten prizes ก่อนเขียน Firestore
+```javascript
+const prizesFlat = {
+  full:   prizes.full,           // [2,8,7,1,8,4]
+  front3: prizes.front3.map(d => d.join('')),  // ["434","758"]
+  back3:  prizes.back3.map(d => d.join('')),   // ["180"]
+  back2:  prizes.back2.join(''), // "15"
+};
+```
+แก้ discord.js ให้อ่าน format ใหม่: `prizes.front3.join(', ')` แทน `.map(d => d.join(''))`
+
+### 5. Discord predict ส่งข้อมูลเกิน
+**[ผู้ใช้]** "ส่งแค่ 6 หลัก ที่เหลือไม่ต้องส่ง"
+**แก้:** ลบ hints summary + หน้า3/หลัง3 + วันที่ออก → เหลือแค่ embed "6 หลัก: NNN NNN"
+
+### 6. Discord webhook secret
+**[ผู้ใช้]** แชร์ webhook URL มาในแชท
+**[Claude Code]** ใส่ GitHub Secret `DISCORD_WEBHOOK` ผ่าน `gh secret set` อัตโนมัติ; แนะนำ regenerate URL หลังใช้งาน
+
+## ผลการทดสอบ (ทั้งสอง mode ผ่าน)
+- `mode=predict force=true` → fetch-hints ✓ → predict ✓ → discord ✓ (6 หลักเข้า Discord)
+- `mode=results force=true` → fetch-results ✓ → discord ✓ (ผลตรวจเข้า Discord)
+- ผลที่ดึงได้: รางวัลที่ 1 = 287184, หน้า3 = 434/758, ท้าย3 = 180, ท้าย2 = 15
+
+## กำหนดการอัตโนมัติต่อไป
+- **30 มิ.ย. 09:00 น.** — ส่งทำนายงวด 1 ก.ค. เข้า Discord
+- **1 ก.ค. 17:00 น.** — ส่งผลตรวจ + เทียบทำนาย เข้า Discord
 
 ---
 
-# ไฟล์ที่เกี่ยวข้อง
+# ไฟล์ที่เกี่ยวข้อง (อัปเดต Session 8)
 
-- `lottery-app-v25.jsx` — โค้ดล่าสุด (~1818 บรรทัด)
-- `PLAN.md` — **แผนปฏิบัติการทีละขั้นสำหรับ Claude Code (งานถัดไป)**
-- `write-hints.js` — script เขียน lockedHints เข้า Firestore (สำหรับ Claude Code)
-- `hints-input.txt` — ไฟล์ตัวอย่าง format หน้า,หลัง
-- `hints-input-66-69.txt` — ข้อมูลเสริม 246 ชุดจาก myhora ปี 66-69 (ถึง 1 มิ.ย. 2569)
-- `raw-2566-2569.txt` — ข้อมูลดิบ myhora (มีรางวัลที่ 1)
-- `write-hints-README.md` — คู่มือใช้ write-hints.js
-- `lottery-reference.md` — เอกสารอ้างอิง (project info, deploy, troubleshooting, features)
-- `README.md` — สารบัญ link ไป reference
-- `Lottery-Analyzer-history.md` — ไฟล์นี้ (ประวัติเต็ม v1-v25 + การออกแบบ automation)
+- `versions/lottery-app-v26.jsx` — โค้ดล่าสุด (สีความถี่ + normalize boost + import engine.js)
+- `src/engine.js` — Computation engine แยกออกจาก App.jsx (shared ระหว่างเว็บ + Node scripts)
+- `scripts/` — automation scripts ครบชุด (_db, fetch-hints, fetch-results, predict, discord)
+- `lottery-dates.txt` — ปฏิทินหวย 2026-2027
+- `.github/workflows/auto-lottery.yml` — cron 09:00/17:00 ICT + workflow_dispatch + force input
+- `PLAN.md` — แผนปฏิบัติการ (Phase A1-B5 เสร็จหมดแล้ว)
+- `hints-input-66-69.txt` — ข้อมูลเสริม 246 ชุดจาก myhora ปี 66-69
+- `Lottery-Analyzer-history.md` — ไฟล์นี้
 
 ---
 
-*สร้างโดยอ่าน transcript 4 session: 2026-05-10, 2026-05-14, 2026-05-25, 2026-06-06*
-*อัปเดต Session 5 (2026-06-09): Claude Code integration + ดึงข้อมูลเสริม myhora*
-*รวมทุกการสนทนา + ถามตอบ + การแก้ไขโค้ดทุกเวอร์ชัน*
+*อัปเดต Session 8 (2026-06-16): ทดสอบจริง + แก้บั๊ก Workflow/Firestore/Discord ครบ*
