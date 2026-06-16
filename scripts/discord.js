@@ -26,32 +26,15 @@ async function sendPredict(stored) {
   const pred = stored.lastPredictions;
   if (!pred || pred.length !== 6) { console.warn('ไม่มีทำนายใน Firestore'); return; }
 
-  const hints  = stored.hints || [];
-  const front  = pred.slice(0, 3).join('');
-  const back   = pred.slice(3, 6).join('');
-
-  // สรุป hints แบบย่อ
-  const hintSummary = hints.length
-    ? [...new Map(hints.map(h => {
-        const k = [h.front, h.back].filter(Boolean).join('/');
-        return [k, (hints.filter(x => [x.front,x.back].filter(Boolean).join('/') === k).length)];
-      }))].sort((a,b)=>b[1]-a[1]).slice(0, 8).map(([k,n])=>n>1?`${k}×${n}`:k).join(' ')
-    : 'ไม่มี';
-
-  // วันที่งวดพรุ่งนี้ (Bangkok)
-  const tomorrow = new Date(Date.now() + 86400000)
-    .toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', year: 'numeric', month: 'long', day: 'numeric' });
+  const front = pred.slice(0, 3).join('');
+  const back  = pred.slice(3, 6).join('');
 
   await send({
     embeds: [{
       title: '🎱 ทำนายเลขงวดพรุ่งนี้',
-      description: `งวด **${tomorrow}**`,
       color: 0x1e40af,
       fields: [
-        { name: '🔢 6 หลัก',  value: `# ${front}  ${back}`,  inline: false },
-        { name: '▶ หน้า 3', value: `**${front}**`, inline: true  },
-        { name: '◀ หลัง 3', value: `**${back}**`,  inline: true  },
-        { name: '📌 Hints',   value: hintSummary || 'ไม่มี', inline: false },
+        { name: '6 หลัก', value: `# ${front}  ${back}`, inline: false },
       ],
       timestamp: new Date().toISOString(),
     }],
