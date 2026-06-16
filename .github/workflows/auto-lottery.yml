@@ -10,6 +10,10 @@ on:
         description: 'predict or results'
         required: true
         default: 'predict'
+      force:
+        description: 'skip calendar check (true/false)'
+        required: false
+        default: 'false'
 
 jobs:
   run:
@@ -41,25 +45,38 @@ jobs:
         if: steps.mode.outputs.mode == 'predict'
         id: check_predict
         run: |
-          TOMORROW=$(TZ='Asia/Bangkok' date -d 'tomorrow' '+%Y-%m-%d')
-          echo "tomorrow=$TOMORROW"
-          if grep -qF "$TOMORROW" lottery-dates.txt; then
+          FORCE="${{ github.event.inputs.force }}"
+          if [ "$FORCE" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "drawDate=$TOMORROW" >> "$GITHUB_OUTPUT"
+            echo "drawDate=$(TZ='Asia/Bangkok' date -d 'tomorrow' '+%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+            echo "force mode - skipping calendar check"
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            TOMORROW=$(TZ='Asia/Bangkok' date -d 'tomorrow' '+%Y-%m-%d')
+            echo "tomorrow=$TOMORROW"
+            if grep -qF "$TOMORROW" lottery-dates.txt; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              echo "drawDate=$TOMORROW" >> "$GITHUB_OUTPUT"
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Check - is today a lottery draw day?
         if: steps.mode.outputs.mode == 'results'
         id: check_results
         run: |
-          TODAY=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
-          echo "today=$TODAY"
-          if grep -qF "$TODAY" lottery-dates.txt; then
+          FORCE="${{ github.event.inputs.force }}"
+          if [ "$FORCE" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "force mode - skipping calendar check"
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            TODAY=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
+            echo "today=$TODAY"
+            if grep -qF "$TODAY" lottery-dates.txt; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Fetch hints from kapook
