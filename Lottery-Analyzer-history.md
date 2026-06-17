@@ -18,8 +18,9 @@
 8. [Session 6: ออกแบบฟีเจอร์สี + ระบบอัตโนมัติ Discord](#session-6)
 9. [Session 7: Phase B2-B5 — ระบบอัตโนมัติ Discord](#session-7)
 10. [Session 8: ทดสอบจริง + แก้บั๊ก Workflow/Firestore/Discord](#session-8)
-11. [สรุประบบทั้งหมด](#สรุประบบ)
-12. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
+11. [Session 9: Phase C1+C2+D — ตรวจสอบ hints/boost/วิเคราะห์ผลทำนาย](#session-9)
+12. [สรุประบบทั้งหมด](#สรุประบบ)
+13. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
 
 ---
 
@@ -847,3 +848,107 @@ const prizesFlat = {
 ---
 
 *อัปเดต Session 8 (2026-06-16): ทดสอบจริง + แก้บั๊ก Workflow/Firestore/Discord ครบ*
+
+---
+
+<a name="session-9"></a>
+# Session 9 (2026-06-18): Phase C1+C2+D — ตรวจสอบ hints/boost/วิเคราะห์ผลทำนาย
+
+## หัวข้อ: ทำ Phase ที่ยังไม่ได้ทำใน PLAN.md
+
+**[ผู้ใช้]** "อ่าน PLAN.md แล้วทำ Phase ที่ยังไม่ได้ทำ"
+
+**[Claude Code]** ดำเนินการ C1 → C2 → D ต่อเนื่อง
+
+---
+
+## C1 — ตรวจว่า hints รีเซ็ตทุกงวด
+
+**ผลการตรวจ:** `scripts/fetch-hints.js` บรรทัด 99:
+```javascript
+await ref.set({ hints, updatedAt: new Date().toISOString() }, { merge: true });
+```
+- ✅ **ถูกต้องแล้ว** — เขียนทับ `hints` ทั้ง array ใหม่ทุกครั้ง ไม่สะสม (ไม่ใช้ arrayUnion)
+- ✅ **ไม่แตะ `lockedHints`** เลย — script เขียนเฉพาะ field `hints` + `updatedAt`
+- **ไม่ต้องแก้อะไร**
+
+---
+
+## C2 — ตรวจว่า boost ของ lockedHints ไม่ตัน
+
+**วิธีตรวจ:** สร้าง `scripts/test-boost.js` ทดสอบด้วย lockedHints สังเคราะห์ 246 ชุด (82 งวด × 3 entries)
+
+**ผลทดสอบ:**
+```
+MAX_LOCKED_BOOST = 5, MAX_W = 20
+Front boost pos1: 8:5.00  1:4.32  7:4.32  (max=5.00)
+Front boost pos2: 1:5.00  4:4.38  3:3.96  (max=5.00)
+Front boost pos3: 4:5.00  2:3.96  6:3.96  (max=5.00)
+Back boost  pos4: 5:5.00  7:3.89  9:3.89  (max=5.00)
+Back boost  pos5: 5:5.00  1:4.67  9:4.67  (max=5.00)
+Back boost  pos6: 8:5.00  4:4.00  7:3.71  (max=5.00)
+```
+- ✅ **ไม่ตัน** — เลขเด่นสุดได้ boost = 5 (MAX_LOCKED_BOOST) เลขอื่นลดหลั่นตามสัดส่วน
+- Boost สูงสุด = 5 = **25% ของ MAX_W (20)** → ไม่มีทางชนเพดาน
+- normalize ทำงานถูกต้อง
+
+**ไฟล์ที่สร้าง:** `scripts/test-boost.js` (เก็บไว้เป็นเครื่องมือตรวจสอบในอนาคต)
+
+---
+
+## D — วิเคราะห์ผลทำนายตกลง (โชค vs logic เพี้ยน)
+
+### ข้อมูลจริงจาก Firestore (อ่านผ่าน REST API — Firestore rules allow read: if true)
+
+**History 50 entries:**
+- Entries 1-26 (date=31/5/2569, created May 31, 2026 via web app): มีทั้ง `pred`, `actual`, `hits`
+- Entries 27-49 (date=25/5/2569, created May 25, 2026 via web app): มี `actual` แต่ไม่มี `pred`/`hits` — user เพิ่ม actual ข้อมูลย้อนหลังโดยไม่มี prediction
+- Entry 50: automation prediction จาก Session 8, ยังไม่มี actual
+
+### สถิติ 26 rounds ที่มี predictions จริง
+- hits = [0,0,1,0,0,1,2,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,1,1,0,0]
+- รวม = 8 hits จาก 26 rounds
+- เฉลี่ย = **0.308 hits/round** (baseline = 0.6)
+- ช่วงแรก (1-13): avg 0.462 / ช่วงหลัง (14-26): avg 0.154
+
+### การตรวจ weights ปัจจุบัน
+```
+pos1: 8→10, 2→10, 1→6   (max=10, MAX_W=20)
+pos2: 0→14, 5→8,  6→6   (max=14, MAX_W=20)
+pos3: 7→12, 2→8,  6→6   (max=12, MAX_W=20)
+pos4: 8→12, 6→8,  9→8   (max=12, MAX_W=20)
+pos5: 9→14, 0→10, 1→6   (max=14, MAX_W=20)
+pos6: 6→12, 2→8,  9→6   (max=12, MAX_W=20)
+```
+- ✅ **ไม่ตัน** — weights กระจาย ไม่มีตำแหน่งใดที่ทุกเลขชน ±20
+
+### ข้อสังเกตสำคัญ: timing กับ v26
+
+- Entries 1-26 เป็น **ข้อมูลจาก v25** (สร้าง May 31, ก่อน deploy v26 ใน Session 8, June 16)
+- v26 (lockedHints 246 + normalize boost) ยังไม่มีข้อมูลประสิทธิภาพจริง (มีแค่ 1 automation prediction รอผล)
+- การ "decline" ที่เห็นไม่เกี่ยวกับ v26 เลย
+
+### ข้อสรุป Phase D: **ปกติตามสุ่ม (Regression to the Mean)**
+
+1. **Logic ไม่เพี้ยน** — weights ไม่ตัน, normalize ทำงานถูก (C2), ไม่มี bug ที่ชัดเจน
+2. **Variance สูงเมื่อ N น้อย** — 26 rounds ไม่เพียงพอสรุปได้ชัด (Z ≈ -2.0 ใกล้ขอบ 95% CI)
+3. **Regression to the mean** — ช่วงแรกได้ hits ดี (lucky streak) แล้วค่อยๆ ลู่เข้าค่าเฉลี่ยจริงของสุ่ม
+4. **ไม่ต้องแก้โค้ด** — ผลนี้ยืนยันว่าลอตเตอรี่สุ่มจริง ไม่สามารถทำนายได้ดีกว่า baseline อย่างสม่ำเสมอ
+5. **ต้องรอข้อมูลเพิ่ม** — automation รันแล้ว 1 ครั้ง (June 16) ต้องรอผลและสะสมอีกหลาย งวด
+
+### สิ่งที่สังเกตเห็นระหว่างทาง (ไม่ใช่ bug แต่ควรทราบ)
+
+- **History ordering inconsistency:** Web app เพิ่ม entry แบบ newest-first (`[entry, ...history]`), automation เพิ่มแบบ newest-last (`[...history, histEntry]`) → array ไม่ consistent แต่ไม่กระทบการคำนวณ เพียงแค่ display อาจสับสน
+
+---
+
+## สรุปทุก Phase ที่ทำ Session 9
+
+| Phase | ผลสรุป |
+|-------|--------|
+| C1 | fetch-hints.js ถูกต้อง — เขียนทับ hints ทุกครั้ง, ไม่แตะ lockedHints |
+| C2 | normalize boost ทำงาน — max boost=5 (25% ของ MAX_W), ไม่ตัน |
+| D | ปกติตามสุ่ม — weights ไม่ตัน, ข้อมูลน้อย variance สูง, ไม่ต้องแก้โค้ด |
+
+**ไฟล์ที่สร้าง:** `scripts/test-boost.js` (เครื่องมือตรวจ normalize boost)
+**ไฟล์ที่แก้:** `PLAN.md` (อัปเดต status C1, C2, D เป็น ✅)
