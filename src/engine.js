@@ -272,7 +272,61 @@ export function buildComparison(pred, prizes) {
   return { cmp, hits6, front3Results, back3Results, back2Result };
 }
 
-// Chi-square test for digit uniformity (H0: uniform 0-9 in each position)
+// ── Phase E: Experiment group helpers ──
+
+// Group A: analyze without any hints (freq + weights only)
+export function analyzeGroupA(rows, lw) {
+  if (!rows.length) return null;
+  const posF = buildPosFreq(rows, 0);
+  const posB = buildPosFreq(rows, 3);
+  return {
+    front: pickHalf(posF, lw.slice(0, 3)),
+    back:  pickHalf(posB, lw.slice(3, 6)),
+  };
+}
+
+// Count how many times each unique hint appears (proxy for source count)
+export function groupHintsBySourceCount(hints) {
+  const map = {};
+  hints.forEach((h) => {
+    const key = `${h.front}|${h.back}`;
+    if (!map[key]) map[key] = { front: h.front, back: h.back, count: 0 };
+    map[key].count++;
+  });
+  return Object.values(map);
+}
+
+// Group D: ensemble — weighted by cumulative performance
+// statsX = { totalHits, rounds } for each group
+export function analyzeEnsemble(predA, predB, predC, statsA, statsB, statsC) {
+  if (!predA || !predB || !predC) return null;
+  const wA = Math.max(0.1, statsA.rounds > 0 ? statsA.totalHits / statsA.rounds : 0.1);
+  const wB = Math.max(0.1, statsB.rounds > 0 ? statsB.totalHits / statsB.rounds : 0.1);
+  const wC = Math.max(0.1, statsC.rounds > 0 ? statsC.totalHits / statsC.rounds : 0.1);
+  const pred = [];
+  for (let i = 0; i < 6; i++) {
+    const votes = {};
+    for (let d = 0; d <= 9; d++) votes[d] = 0;
+    votes[predA[i]] = (votes[predA[i]] || 0) + wA;
+    votes[predB[i]] = (votes[predB[i]] || 0) + wB;
+    votes[predC[i]] = (votes[predC[i]] || 0) + wC;
+    const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
+    pred.push(parseInt(best[0]));
+  }
+  return pred;
+}
+
+// One-tailed z-test: is average hits significantly > 0.6 (baseline)?
+// H0: mu=0.6, sigma=sqrt(6*0.1*0.9)~0.7348 (sum of 6 Bernoulli(0.1))
+export function isStatisticallySignificant(totalHits, rounds) {
+  if (rounds < 30) return false;
+  const xBar  = totalHits / rounds;
+  const sigma = Math.sqrt(6 * 0.1 * 0.9);
+  const z     = (xBar - 0.6) / (sigma / Math.sqrt(rounds));
+  return z > 1.645; // p < 0.05 one-tailed
+}
+
+// ── Chi-square test for digit uniformity (H0: uniform 0-9 in each position)
 export function chiSquareDigits(rows) {
   if (rows.length < 30) return null;
   const positions = [];

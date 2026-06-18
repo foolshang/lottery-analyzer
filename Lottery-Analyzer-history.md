@@ -19,8 +19,9 @@
 9. [Session 7: Phase B2-B5 — ระบบอัตโนมัติ Discord](#session-7)
 10. [Session 8: ทดสอบจริง + แก้บั๊ก Workflow/Firestore/Discord](#session-8)
 11. [Session 9: Phase C1+C2+D — ตรวจสอบ hints/boost/วิเคราะห์ผลทำนาย](#session-9)
-12. [สรุประบบทั้งหมด](#สรุประบบ)
-13. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
+12. [Session 10: Phase E — ระบบทดสอบสัญญาณ 4 กลุ่ม (A/B/C/D ensemble)](#session-10)
+13. [สรุประบบทั้งหมด](#สรุประบบ)
+14. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
 
 ---
 
@@ -952,3 +953,102 @@ pos6: 6→12, 2→8,  9→6   (max=12, MAX_W=20)
 
 **ไฟล์ที่สร้าง:** `scripts/test-boost.js` (เครื่องมือตรวจ normalize boost)
 **ไฟล์ที่แก้:** `PLAN.md` (อัปเดต status C1, C2, D เป็น ✅)
+
+---
+
+<a name="session-10"></a>
+# Session 10 (2026-06-18): Phase E — ระบบทดสอบสัญญาณ 4 กลุ่ม (A/B/C/D ensemble)
+
+## หัวข้อ: ทำ Phase E ที่ยังไม่ได้ทำ (อ่านจาก D:\Browser\PLAN.md)
+
+**[ผู้ใช้]** "อ่าน plan กับ history ใน D:\Browser แล้วทำในส่วนที่ยังไม่ได้ทำ"
+
+**[Claude Code]** พบว่า PLAN.md ใน D:\Browser มี Phase E ⬜ ยังไม่ทำ — ดำเนินการขั้น 0 → ขั้น 5 ต่อเนื่อง
+
+---
+
+## Phase E — การออกแบบ (จาก Session 9 ห้องแชท)
+
+เป้าหมาย: เปลี่ยนจาก "เครื่องเดาเลข" → "ห้องทดลองวัดสัญญาณ" — ทำนายหลายวิธีพร้อมกัน เทียบผลสะสม ตรวจว่ามีกลุ่มใดเกิน baseline 0.6 อย่างมีนัยสำคัญ
+
+**4 กลุ่ม:**
+- **กลุ่ม A (control):** freq + weights เท่านั้น ไม่ใช้ hints เลย
+- **กลุ่ม B (current):** ระบบปัจจุบัน (freq + weights + hints ทั้งหมด)
+- **กลุ่ม C (เข้ม):** freq + weights + hints เฉพาะที่ปรากฏ ≥3 สำนัก
+- **กลุ่ม D (ensemble):** ถ่วงน้ำหนักผล A/B/C ตาม performance สะสม — เริ่มต้น silent
+
+**กลุ่ม D 3 สถานะ:** 🔇 เงียบ → 🔓 ปลดล็อก → ✅ ยืนยัน
+**เกณฑ์ปลดล็อก D (แบบ B เข้ม):** ต้องครบทั้ง 2 ข้อ: (1) ≥30 งวด, (2) มีกลุ่มใดมีนัยสำคัญทางสถิติ (z-test one-tailed p<0.05)
+
+---
+
+## สิ่งที่ทำ Session 10
+
+### ขั้น 0 — แก้ history ordering + createdAt
+- **lottery-app-v27.jsx** (สร้างจาก v26):
+  - บรรทัด history: `[entry, ...history].slice(0, 50)` → `[...history, entry].slice(-50)` (newest-last ตรงกับ automation)
+  - เพิ่ม `createdAt: new Date().toISOString()` ใน entry object
+  - อัปเดต header เว็บ: v26 → v27
+
+### ขั้น 1 — engine.js เพิ่ม Phase E functions
+- `analyzeGroupA(rows, lw)` — คำนวณโดยไม่ใช้ hints (Group A)
+- `groupHintsBySourceCount(hints)` — นับว่าแต่ละ hint ปรากฏกี่ครั้ง (proxy สำหรับจำนวนสำนัก)
+- `analyzeEnsemble(predA, predB, predC, statsA, statsB, statsC)` — ถ่วงน้ำหนักโดย avgHits สะสม
+- `isStatisticallySignificant(totalHits, rounds)` — z-test: เฉลี่ยหลุด 0.6 อย่างมีนัยสำคัญไหม (p<0.05)
+
+### ขั้น 2-3 — predict.js (เขียนใหม่)
+- คำนวณ predictions ครบ 4 กลุ่ม (A/B/C/D) ทุกงวด
+- กลุ่ม C: กรอง hints ที่ count ≥ 3 จาก `groupHintsBySourceCount`
+- กลุ่ม D: ใช้ `analyzeEnsemble` ถ่วงน้ำหนักตาม stats สะสม (เริ่มต้น wA=wB=wC=0.1)
+- เขียน `experiment.pending` ลง Firestore (A/B/C/D predictions) + คง `lastPredictions` (= B) เพื่อเว็บใช้ได้ต่อ
+
+### ขั้น 3-4 — fetch-results.js (แก้)
+- อ่าน `experiment.pending` → คำนวณ hits ทุกกลุ่ม
+- อัปเดต `experiment.A/B/C/D` (totalHits, rounds)
+- เพิ่ม entry ใน `experiment.history` (newest-last, max 100)
+- เช็คเกณฑ์ปลดล็อก D อัตโนมัติทุกงวด
+- แก้ `history` ordering: เพิ่ม `createdAt`, ใช้ `[...history, histEntry].slice(-50)` (newest-last)
+
+### ขั้น 4 — discord.js (แก้)
+- **predict:** แสดง Group B (เหมือนเดิม) + Group D ถ้าปลดล็อก + สถิติ n งวดสะสม
+- **results:** แสดงตาราง experiment (hits งวดนี้ A/B/C/D, เฉลี่ยสะสม, แจ้งถ้า D ปลดล็อก)
+
+### ขั้น 5 — ป้องกัน overfitting
+- ระบบบันทึกเฉพาะ predictions ที่ส่งก่อนรู้ผล (`pending` set ตอน predict, ล้างตอน results)
+- กลุ่ม D ถ่วงน้ำหนักจาก performance จริง ไม่ปรับ rule ย้อนหลัง
+- `startedAt` บันทึก timestamp เริ่มต้น experiment
+
+---
+
+## โครงสร้าง Firestore ใหม่ (field `experiment`)
+
+```javascript
+experiment: {
+  startedAt: "ISO timestamp",
+  A: { totalHits: N, rounds: N },
+  B: { totalHits: N, rounds: N },
+  C: { totalHits: N, rounds: N },
+  D: { totalHits: N, rounds: N, status: 'silent'|'unlocked', unlockedAt: null|'ISO' },
+  history: [  // newest-last, max 100 entries
+    { drawDate, predA, predB, predC, predD, actual, hitsA, hitsB, hitsC, hitsD, createdAt }
+  ],
+  pending: {  // set ตอน predict, null ตอน results
+    A: [6 digits], B: [6 digits], C: [6 digits], D: [6 digits]
+  }
+}
+```
+
+---
+
+## ไฟล์ที่สร้าง/แก้ Session 10
+
+| ไฟล์ | การเปลี่ยนแปลง |
+|------|----------------|
+| `versions/lottery-app-v27.jsx` | สร้างใหม่จาก v26 — history newest-last + createdAt |
+| `src/engine.js` | เพิ่ม analyzeGroupA, groupHintsBySourceCount, analyzeEnsemble, isStatisticallySignificant |
+| `scripts/predict.js` | เขียนใหม่ — คำนวณ 4 กลุ่ม + เขียน experiment.pending |
+| `scripts/fetch-results.js` | แก้ — record experiment hits, D unlock check, history createdAt |
+| `scripts/discord.js` | แก้ — แสดง experiment stats, Group D ถ้าปลดล็อก |
+| `PLAN.md` | อัปเดต Phase E เป็น ✅, copy จาก D:\Browser (มี Phase E) |
+
+**หมายเหตุ:** ระบบนี้ต้องสะสมข้อมูลหลายสิบงวดถึงจะสรุปผลได้ — เป็น long-term experiment ตามแนวคิดหลักของโปรเจกต์

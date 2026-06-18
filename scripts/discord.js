@@ -1,4 +1,4 @@
-// discord.js — ส่งข้อความเข้า Discord webhook
+// discord.js — ส่งข้อความเข้า Discord webhook (Phase E: 4 groups)
 // Usage: node discord.js predict | node discord.js results
 import { db, COL, DOC } from './_db.js';
 
@@ -7,9 +7,9 @@ if (!WEBHOOK) throw new Error('DISCORD_WEBHOOK env var is not set');
 
 async function send(payload) {
   const res = await fetch(WEBHOOK, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body:    JSON.stringify(payload),
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
@@ -17,25 +17,48 @@ async function send(payload) {
   }
 }
 
-function avgHits(history) {
-  if (!history.length) return '0.00';
-  return (history.reduce((s, h) => s + (h.hits || 0), 0) / history.length).toFixed(2);
+function avgStr(s) {
+  if (!s || s.rounds === 0) return '-';
+  return (s.totalHits / s.rounds).toFixed(2);
 }
 
 async function sendPredict(stored) {
-  const pred = stored.lastPredictions;
+  const pred       = stored.lastPredictions;
+  const experiment = stored.experiment;
   if (!pred || pred.length !== 6) { console.warn('ไม่มีทำนายใน Firestore'); return; }
 
   const front = pred.slice(0, 3).join('');
   const back  = pred.slice(3, 6).join('');
 
+  const fields = [
+    { name: '6 หลัก (กลุ่ม B)', value: `# ${front}  ${back}`, inline: false },
+  ];
+
+  // แสดงกลุ่ม D ถ้าปลดล็อกแล้ว
+  const pending = experiment?.pending;
+  const dStatus = experiment?.D?.status || 'silent';
+  if (dStatus !== 'silent' && pending?.D) {
+    const dF = pending.D.slice(0, 3).join('');
+    const dB = pending.D.slice(3, 6).join('');
+    fields.push({ name: '🔓 กลุ่ม D (ensemble)', value: `**${dF}  ${dB}**`, inline: false });
+  }
+
+  if (experiment) {
+    const n = experiment.B?.rounds || 0;
+    if (n > 0) {
+      fields.push({
+        name:  `📊 สถิติ ${n} งวด`,
+        value: `A: ${avgStr(experiment.A)} | B: ${avgStr(experiment.B)} | C: ${avgStr(experiment.C)} | D: ${avgStr(experiment.D)} | baseline 0.60`,
+        inline: false,
+      });
+    }
+  }
+
   await send({
     embeds: [{
-      title: '🎱 ทำนายเลขงวดพรุ่งนี้',
-      color: 0x1e40af,
-      fields: [
-        { name: '6 หลัก', value: `# ${front}  ${back}`, inline: false },
-      ],
+      title:     '🎱 ทำนายเลขงวดพรุ่งนี้',
+      color:     0x1e40af,
+      fields,
       timestamp: new Date().toISOString(),
     }],
   });
@@ -47,14 +70,15 @@ async function sendResults(stored) {
   if (!lr) { console.warn('ไม่มี lastResults ใน Firestore'); return; }
 
   const { prizes, cmp, drawDate, prediction } = lr;
-  const history = stored.history || [];
+  const history    = stored.history    || [];
+  const experiment = stored.experiment || {};
 
   const actual  = prizes.full.join('');
   const predStr = prediction ? prediction.join('') : null;
   const hits    = cmp ? cmp.hits6 : 0;
 
-  const front3Win = cmp?.front3Results?.some(r => r.win);
-  const back3Win  = cmp?.back3Results?.some(r => r.win);
+  const front3Win = cmp?.front3Results?.some((r) => r.win);
+  const back3Win  = cmp?.back3Results?.some((r) => r.win);
   const back2Win  = cmp?.back2Result?.win;
 
   const f3str = (prizes.front3 || []).join(', ') || '-';
@@ -64,33 +88,61 @@ async function sendResults(stored) {
   const color = hits >= 5 ? 0xfbbf24 : hits >= 3 ? 0x16a34a : hits >= 1 ? 0xf59e0b : 0x6b7280;
 
   const fields = [
-    { name: '🏆 รางวัลที่ 1', value: `# ${actual.slice(0,3)}  ${actual.slice(3)}`, inline: false },
-    { name: 'หน้า 3', value: f3str, inline: true  },
-    { name: 'ท้าย 3', value: b3str, inline: true  },
-    { name: 'ท้าย 2', value: b2str, inline: true  },
+    { name: '🏆 รางวัลที่ 1', value: `# ${actual.slice(0, 3)}  ${actual.slice(3)}`, inline: false },
+    { name: 'หน้า 3', value: f3str, inline: true },
+    { name: 'ท้าย 3', value: b3str, inline: true },
+    { name: 'ท้าย 2', value: b2str, inline: true },
   ];
 
   if (predStr) {
     fields.push(
-      { name: '🤖 ทำนายไว้', value: `${predStr.slice(0,3)}-${predStr.slice(3)}`, inline: true },
-      { name: 'ถูก',         value: `${hits}/6 ตัว`,                             inline: true },
-      { name: 'รางวัลย่อย',  value: [
+      { name: '🤖 ทำนายไว้ (B)', value: `${predStr.slice(0, 3)}-${predStr.slice(3)}`, inline: true },
+      { name: 'ถูก',              value: `${hits}/6 ตัว`,                              inline: true },
+      {
+        name:   'รางวัลย่อย',
+        value:  [
           front3Win ? '✅ หน้า 3' : '❌ หน้า 3',
           back3Win  ? '✅ ท้าย 3' : '❌ ท้าย 3',
           back2Win  ? '✅ ท้าย 2' : '❌ ท้าย 2',
-        ].join(' | '), inline: false },
+        ].join(' | '),
+        inline: false,
+      },
     );
   }
 
-  fields.push({
-    name: `📊 สถิติ (${history.length} รอบล่าสุด)`,
-    value: `เฉลี่ย **${avgHits(history)}** ตัว/รอบ  (baseline 0.60)`,
-    inline: false,
-  });
+  // Phase E: สถิติเทียบกลุ่ม
+  const nRounds = experiment.B?.rounds || 0;
+  if (nRounds > 0) {
+    // ดึง hits งวดนี้ จาก experiment history รายการล่าสุด
+    const lastExp = (experiment.history || []).slice(-1)[0];
+    const lineA = lastExp ? `A: ${lastExp.hitsA}/6` : `A: -`;
+    const lineB = lastExp ? `B: ${lastExp.hitsB}/6` : `B: -`;
+    const lineC = lastExp ? `C: ${lastExp.hitsC}/6` : `C: -`;
+    const lineD = lastExp ? `D: ${lastExp.hitsD}/6` : `D: -`;
+
+    fields.push({
+      name:   `🔬 การทดลอง (${nRounds} งวด)`,
+      value:  [
+        `งวดนี้ — ${lineA} | ${lineB} | ${lineC} | ${lineD}`,
+        `สะสม — A: **${avgStr(experiment.A)}** | B: **${avgStr(experiment.B)}** | C: **${avgStr(experiment.C)}** | D: **${avgStr(experiment.D)}**`,
+        `baseline 0.60${experiment.D?.status === 'unlocked' ? ' | 🔓 D ปลดล็อกแล้ว' : ''}`,
+      ].join('\n'),
+      inline: false,
+    });
+  } else {
+    const avg = history.length > 0
+      ? (history.reduce((s, h) => s + (h.hits || 0), 0) / history.length).toFixed(2)
+      : '0.00';
+    fields.push({
+      name:   `📊 สถิติ (${history.length} รอบ)`,
+      value:  `เฉลี่ย **${avg}** ตัว/รอบ  (baseline 0.60)`,
+      inline: false,
+    });
+  }
 
   await send({
     embeds: [{
-      title: `📋 ผลหวย งวด ${drawDate || ''}`,
+      title:     `📋 ผลหวย งวด ${drawDate || ''}`,
       color,
       fields,
       timestamp: new Date().toISOString(),
@@ -105,10 +157,8 @@ async function main() {
     console.error('Usage: node discord.js predict | node discord.js results');
     process.exit(1);
   }
-
-  const snap = await db.collection(COL).doc(DOC).get();
+  const snap   = await db.collection(COL).doc(DOC).get();
   const stored = snap.exists ? snap.data() : {};
-
   if (mode === 'predict') await sendPredict(stored);
   else                    await sendResults(stored);
 }
