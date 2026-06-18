@@ -20,8 +20,9 @@
 10. [Session 8: ทดสอบจริง + แก้บั๊ก Workflow/Firestore/Discord](#session-8)
 11. [Session 9: Phase C1+C2+D — ตรวจสอบ hints/boost/วิเคราะห์ผลทำนาย](#session-9)
 12. [Session 10: Phase E — ระบบทดสอบสัญญาณ 4 กลุ่ม (A/B/C/D ensemble)](#session-10)
-13. [สรุประบบทั้งหมด](#สรุประบบ)
-14. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
+13. [Session 11: วิเคราะห์พฤติกรรม hints หลังกด Analyze](#session-11)
+14. [สรุประบบทั้งหมด](#สรุประบบ)
+15. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
 
 ---
 
@@ -1052,3 +1053,44 @@ experiment: {
 | `PLAN.md` | อัปเดต Phase E เป็น ✅, copy จาก D:\Browser (มี Phase E) |
 
 **หมายเหตุ:** ระบบนี้ต้องสะสมข้อมูลหลายสิบงวดถึงจะสรุปผลได้ — เป็น long-term experiment ตามแนวคิดหลักของโปรเจกต์
+
+---
+
+<a name="session-11"></a>
+# Session 11 (2026-06-19): วิเคราะห์พฤติกรรม hints หลังกด Analyze
+
+## หัวข้อ: hints ไม่ถูกรีเซ็ตหลังกด Analyze
+
+**[ผู้ใช้]** "ทำไมข้อมูลที่ไม่ได้ล๊อกถึงไม่ถูกรีเซ็ตหลังจากกดวิเคราะห์"
+
+**[Claude Code]** ตรวจโค้ด `handleAnalyze` ใน lottery-app-v27.jsx พบว่าบรรทัด 694 มี `setHints([{ front: "", back: "" }])` อยู่แล้ว และบรรทัด 699 ส่ง override `hints: [{front:"",back:""}]` เข้า `saveAll` ด้วย — หมายความว่าโค้ดรีเซ็ต hints ถูกต้อง
+
+## การวิเคราะห์ root cause
+
+**[Claude Code]** ตรวจ anti-loop mechanism:
+- `lastSaveAt.current = Date.now()` ตั้งก่อน `setDoc`
+- `applySnapshot` เช็ค: `if (fromRemote && Date.now() - lastSaveAt.current < 2000) return`
+- หน้าต่าง 2 วินาทีป้องกันได้แค่ "echo ของตัวเอง" เท่านั้น
+
+**สาเหตุที่คิดว่า hints กลับมา:**
+- `fetch-hints.js` (automation script) เขียน `hints` field ลง Firestore ทุกงวด 09:00 น.
+- เมื่อ automation เขียน → onSnapshot ยิง → `fromRemote=true` + `Date.now() - lastSaveAt > 2000` → ไม่ skip → `setHints(kapookData)` → hints กลับมา
+
+**[ผู้ใช้]** ยืนยัน: เป็น bug ที่ hints ไม่ล้าง
+
+## ข้อสรุป: ไม่ใช่ bug — เป็น behavior ที่ถูกต้อง
+
+**[ผู้ใช้]** "ระบบออโต้ จะเคลียร์ hints เองใช่ไหม เข้าใจถูกไหม"
+
+**[Claude Code]** เข้าใจถูกต้อง — flow จริงคือ:
+1. automation รันทุกงวด 09:00 น. → เขียน hints ใหม่จาก kapook ทับลง Firestore (เคลียร์ของเก่า + เติมของงวดหน้า)
+2. ผู้ใช้กด Analyze → hints ถูกเคลียร์ชั่วคราว
+3. automation รันรอบถัดไป → hints ใหม่ปรากฏใน web app ผ่าน onSnapshot
+
+**hints ที่ "กลับมา" หลัง Analyze คือ hints ใหม่ของงวดถัดไปที่ automation เพิ่งเขียน ไม่ใช่ hints เก่า**
+
+## สรุปผล
+
+- **ไม่ต้องแก้โค้ด** — พฤติกรรมนี้ถูกต้องตาม design ของระบบอัตโนมัติ
+- automation `fetch-hints.js` ทำหน้าที่ "refresh hints" ให้ทุกงวดโดยอัตโนมัติ
+- ผู้ใช้ไม่จำเป็นต้องจัดการ hints ด้วยตนเองระหว่างงวด
