@@ -1,4 +1,4 @@
-// draw-date.js — หาวันงวดถัดไปจากไทยรัฐ + ตัดสินใจว่าส่งทำนายไหม
+// draw-date.js — หาวันงวดถัดไปจาก kapook + ตัดสินใจว่าส่งทำนายไหม
 // Output (GITHUB_OUTPUT): send=true/false, drawDate=YYYY-MM-DD
 import { readFileSync, appendFileSync } from 'node:fs';
 import { fileURLToPath }               from 'node:url';
@@ -9,30 +9,6 @@ const __dirname  = dirname(fileURLToPath(import.meta.url));
 const DATES_PATH = join(__dirname, '..', 'lottery-dates.txt');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
-
-const MONTH_MAP = {
-  'มกราคม':    1,
-  'กุมภาพันธ์':  2,
-  'มีนาคม':    3,
-  'เมษายน':    4,
-  'พฤษภาคม':   5,
-  'มิถุนายน':   6,
-  'กรกฎาคม':   7,
-  'สิงหาคม':   8,
-  'กันยายน':   9,
-  'ตุลาคม':    10,
-  'พฤศจิกายน': 11,
-  'ธันวาคม':   12,
-};
-
-function parseThaiDate(d, m, y) {
-  const month = MONTH_MAP[m];
-  if (!month) return null;
-  const year = parseInt(y, 10) - 543; // BE → CE
-  if (year < 2024 || year > 2035) return null;
-  const day = parseInt(d, 10);
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
 
 function todayICT() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -51,33 +27,42 @@ function setOutput(name, val) {
   }
 }
 
-// ── Primary: ดึงจากไทยรัฐ ──────────────────────────────────────────────────
-async function getNextDrawDateFromThairath() {
-  const url = 'https://www.thairath.co.th/lottery';
+// ── Primary: ดึงจาก kapook (ลิงก์ /check/DDMMYY → เลือกวันใหม่สุด) ──────────
+async function getNextDrawDateFromKapook() {
+  const url = 'https://lottery.kapook.com/';
   console.log(`Fetching ${url}`);
   const res = await fetch(url, {
     headers: { 'User-Agent': UA },
     signal: AbortSignal.timeout(15000),
   });
-  if (!res.ok) throw new Error(`Thairath HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`kapook HTTP ${res.status}`);
   const html = await res.text();
 
-  // หา "งวดประจำวันที่ D monthname YYYY"
-  const m = html.match(/งวดประจำวันที่\s+(\d{1,2})\s+([฀-๿]+)\s+(\d{4})/);
-  if (!m) throw new Error('ไม่พบ "งวดประจำวันที่" ใน HTML ไทยรัฐ');
+  // เก็บรหัสวันงวดทั้งหมดจากลิงก์ /check/DDMMYY
+  const codes = [...html.matchAll(/\/check\/(\d{2})(\d{2})(\d{2})\b/g)];
+  if (codes.length === 0) throw new Error('ไม่พบ /check/DDMMYY ใน kapook');
 
-  const [, day, monthName, year] = m;
-  console.log(`ไทยรัฐแสดงงวด: ${day} ${monthName} ${year}`);
-
-  // ตรวจว่าผลยังไม่ออก
-  if (!html.includes('XXXXXX')) {
-    throw new Error(`ผลงวดนี้ออกแล้ว ไม่ใช่งวดถัดไป (ไม่พบ XXXXXX)`);
+  // แปลง DDMMYY (ปี พ.ศ. 2 หลักท้าย) → ISO YYYY-MM-DD + validate วันจริง
+  const isoDates = [];
+  for (const [, dd, mm, yy] of codes) {
+    const day   = parseInt(dd, 10);
+    const month = parseInt(mm, 10);
+    const year  = (2500 + parseInt(yy, 10)) - 543; // BE2 → BE → CE
+    if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+    if (year < 2024 || year > 2035) continue;
+    const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    // กันวันที่ไม่มีจริง เช่น 310269
+    const d = new Date(`${iso}T00:00:00+07:00`);
+    if (Number.isNaN(d.getTime())) continue;
+    isoDates.push(iso);
   }
+  if (isoDates.length === 0) throw new Error('แปลงวันงวดจาก kapook ไม่ได้');
 
-  const iso = parseThaiDate(day, monthName, year);
-  if (!iso) throw new Error(`parse วันที่ล้มเหลว: ${day} ${monthName} ${year}`);
-
-  return iso;
+  // งวดถัดไป = วันใหม่สุด
+  isoDates.sort();
+  const next = isoDates[isoDates.length - 1];
+  console.log(`kapook /check codes พบ ${isoDates.length} วัน → งวดถัดไป (ใหม่สุด) = ${next}`);
+  return next;
 }
 
 // ── Fallback: อ่านจาก lottery-dates.txt ──────────────────────────────────
@@ -96,9 +81,9 @@ function getNextDrawDateFromCalendar() {
 // ── Export สำหรับ test ────────────────────────────────────────────────────
 export async function getNextDrawDate() {
   try {
-    return await getNextDrawDateFromThairath();
+    return await getNextDrawDateFromKapook();
   } catch (err) {
-    console.warn(`[warning] ไทยรัฐ: ${err.message}`);
+    console.warn(`[warning] kapook: ${err.message}`);
     console.warn('[warning] ใช้ lottery-dates.txt เป็น fallback');
     return getNextDrawDateFromCalendar();
   }
