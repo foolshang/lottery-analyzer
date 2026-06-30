@@ -5,7 +5,8 @@ import {
   convertHintsToBoost, groupHintsBySourceCount,
 } from '../src/engine.js';
 
-const DRY_RUN = process.argv.includes('--dry-run');
+const DRY_RUN  = process.argv.includes('--dry-run');
+const DRAW_DATE = process.env.DRAW_DATE || null;
 
 function initExperiment() {
   return {
@@ -16,6 +17,7 @@ function initExperiment() {
     D: { totalHits: 0, rounds: 0, status: 'silent', unlockedAt: null },
     history: [],
     pending: null,
+    sent:    { predictedDraw: null, resultsDraw: null },
   };
 }
 
@@ -71,6 +73,7 @@ async function main() {
   const newExperiment = {
     ...experiment,
     pending: { A: predA, B: predB, C: predC, D: predD },
+    sent:    { ...(experiment.sent || {}), predictedDraw: DRAW_DATE },
   };
 
   await ref.set({

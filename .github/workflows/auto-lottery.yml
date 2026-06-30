@@ -11,7 +11,7 @@ on:
         required: true
         default: 'predict'
       force:
-        description: 'skip calendar check (true/false)'
+        description: 'skip all guards (true/false)'
         required: false
         default: 'false'
 
@@ -41,71 +41,46 @@ jobs:
             echo "mode=results" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check - is tomorrow a lottery draw day?
+      # ── PREDICT FLOW ──────────────────────────────────────────────────────
+      - name: Decide predict (Thairath + 2-day window + dedup)
+        id: decide
         if: steps.mode.outputs.mode == 'predict'
-        id: check_predict
-        run: |
-          FORCE="${{ github.event.inputs.force }}"
-          if [ "$FORCE" = "true" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "drawDate=$(TZ='Asia/Bangkok' date -d 'tomorrow' '+%Y-%m-%d')" >> "$GITHUB_OUTPUT"
-            echo "force mode - skipping calendar check"
-          else
-            TOMORROW=$(TZ='Asia/Bangkok' date -d 'tomorrow' '+%Y-%m-%d')
-            echo "tomorrow=$TOMORROW"
-            if grep -qF "$TOMORROW" lottery-dates.txt; then
-              echo "run=true" >> "$GITHUB_OUTPUT"
-              echo "drawDate=$TOMORROW" >> "$GITHUB_OUTPUT"
-            else
-              echo "run=false" >> "$GITHUB_OUTPUT"
-            fi
-          fi
-
-      - name: Check - is today a lottery draw day?
-        if: steps.mode.outputs.mode == 'results'
-        id: check_results
-        run: |
-          FORCE="${{ github.event.inputs.force }}"
-          if [ "$FORCE" = "true" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "force mode - skipping calendar check"
-          else
-            TODAY=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
-            echo "today=$TODAY"
-            if grep -qF "$TODAY" lottery-dates.txt; then
-              echo "run=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "run=false" >> "$GITHUB_OUTPUT"
-            fi
-          fi
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: node scripts/draw-date.js
 
       - name: Fetch hints from kapook
-        if: steps.mode.outputs.mode == 'predict' && steps.check_predict.outputs.run == 'true'
+        if: steps.mode.outputs.mode == 'predict' && steps.decide.outputs.send == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node scripts/fetch-hints.js
 
       - name: Run prediction
-        if: steps.mode.outputs.mode == 'predict' && steps.check_predict.outputs.run == 'true'
+        if: steps.mode.outputs.mode == 'predict' && steps.decide.outputs.send == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          DRAW_DATE: ${{ steps.decide.outputs.drawDate }}
         run: node scripts/predict.js
 
       - name: Send prediction to Discord
-        if: steps.mode.outputs.mode == 'predict' && steps.check_predict.outputs.run == 'true'
+        if: steps.mode.outputs.mode == 'predict' && steps.decide.outputs.send == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: node scripts/discord.js predict
 
+      # ── RESULTS FLOW ──────────────────────────────────────────────────────
       - name: Fetch results from myhora
-        if: steps.mode.outputs.mode == 'results' && steps.check_results.outputs.run == 'true'
+        id: results
+        if: steps.mode.outputs.mode == 'results'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FORCE: ${{ github.event.inputs.force }}
         run: node scripts/fetch-results.js
 
       - name: Send results to Discord
-        if: steps.mode.outputs.mode == 'results' && steps.check_results.outputs.run == 'true'
+        if: steps.mode.outputs.mode == 'results' && steps.results.outputs.send == 'true'
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}

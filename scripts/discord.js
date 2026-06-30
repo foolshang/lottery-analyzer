@@ -27,20 +27,27 @@ async function sendPredict(stored) {
   const experiment = stored.experiment;
   if (!pred || pred.length !== 6) { console.warn('ไม่มีทำนายใน Firestore'); return; }
 
-  const front = pred.slice(0, 3).join('');
-  const back  = pred.slice(3, 6).join('');
+  // ฟอร์แมตเลข 6 ตัว → "front  back"
+  const fmt = (arr) => `${arr.slice(0, 3).join('')}  ${arr.slice(3, 6).join('')}`;
 
-  const fields = [
-    { name: '6 หลัก (กลุ่ม B)', value: `# ${front}  ${back}`, inline: false },
-  ];
-
-  // แสดงกลุ่ม D ถ้าปลดล็อกแล้ว
   const pending = experiment?.pending;
+  const fields  = [];
+
+  // แสดง 3 ชุด A/B/C (อ่านจาก experiment.pending; fallback B ชุดเดียวถ้าข้อมูลเก่า)
+  if (pending?.A && pending?.B && pending?.C) {
+    fields.push(
+      { name: 'A (ไม่ใช้ hints)',  value: `# ${fmt(pending.A)}`, inline: false },
+      { name: 'B (หลัก)',          value: `# ${fmt(pending.B)}`, inline: false },
+      { name: 'C (hints ≥3 สำนัก)', value: `# ${fmt(pending.C)}`, inline: false },
+    );
+  } else {
+    fields.push({ name: '6 หลัก (กลุ่ม B)', value: `# ${fmt(pred)}`, inline: false });
+  }
+
+  // แสดงกลุ่ม D ต่อเมื่อปลดล็อกแล้วเท่านั้น
   const dStatus = experiment?.D?.status || 'silent';
   if (dStatus !== 'silent' && pending?.D) {
-    const dF = pending.D.slice(0, 3).join('');
-    const dB = pending.D.slice(3, 6).join('');
-    fields.push({ name: '🔓 กลุ่ม D (ensemble)', value: `**${dF}  ${dB}**`, inline: false });
+    fields.push({ name: '🔓 D (ensemble)', value: `**${fmt(pending.D)}**`, inline: false });
   }
 
   if (experiment) {

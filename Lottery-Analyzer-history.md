@@ -21,8 +21,10 @@
 11. [Session 9: Phase C1+C2+D — ตรวจสอบ hints/boost/วิเคราะห์ผลทำนาย](#session-9)
 12. [Session 10: Phase E — ระบบทดสอบสัญญาณ 4 กลุ่ม (A/B/C/D ensemble)](#session-10)
 13. [Session 11: วิเคราะห์พฤติกรรม hints หลังกด Analyze](#session-11)
-14. [สรุประบบทั้งหมด](#สรุประบบ)
-15. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
+14. [Session 12: discord.js ส่งทำนาย 3 ชุด A/B/C](#session-12)
+15. [Session 13: ใช้ไทยรัฐหาวันงวด + ส่งล่วงหน้า 2 วัน + กันส่งซ้ำ](#session-13)
+16. [สรุประบบทั้งหมด](#สรุประบบ)
+17. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
 
 ---
 
@@ -1094,3 +1096,73 @@ experiment: {
 - **ไม่ต้องแก้โค้ด** — พฤติกรรมนี้ถูกต้องตาม design ของระบบอัตโนมัติ
 - automation `fetch-hints.js` ทำหน้าที่ "refresh hints" ให้ทุกงวดโดยอัตโนมัติ
 - ผู้ใช้ไม่จำเป็นต้องจัดการ hints ด้วยตนเองระหว่างงวด
+
+---
+
+<a name="session-12"></a>
+# Session 12 (2026-06-30): discord.js ส่งทำนาย 3 ชุด A/B/C
+
+## หัวข้อ: แก้ sendPredict ให้ส่งครบ 3 กลุ่ม
+
+**[ผู้ใช้]** ต้องการให้ predict ส่ง 3 ชุด A/B/C แทนที่จะส่งแค่กลุ่ม B
+
+**[Claude Code]** ตรวจสอบ `scripts/discord.js` ฟังก์ชัน `sendPredict` พบว่าอ่านแค่ `stored.lastPredictions` (= B เสมอ) แม้ `predict.js` จะคำนวณและเก็บ `experiment.pending = { A, B, C, D }` ไว้ใน Firestore แล้ว
+
+## สิ่งที่แก้ (discord.js เท่านั้น)
+
+- แทนที่บล็อก `fields` เดิมด้วยโค้ดที่อ่านจาก `experiment.pending`:
+  - ถ้ามี `pending.A`, `pending.B`, `pending.C` ครบ → แสดง 3 fields แยกกัน (A / B / C)
+  - ถ้าไม่มี pending ครบ (ข้อมูลเก่า) → fallback ส่ง B ชุดเดียวเหมือนเดิม
+  - กลุ่ม D ยังเงียบ (`status='silent'`) → ไม่แสดงจนกว่าจะปลดล็อก
+- เพิ่ม helper `fmt(arr)` ย่อ code ฟอร์แมต "NNN  NNN"
+- ไม่แตะ `sendResults` และส่วนสถิติสะสม
+
+**ไม่ต้อง deploy หรือขึ้น version ใหม่** — discord.js เป็น script Node ที่ GitHub Actions รันเอง
+
+---
+
+<a name="session-13"></a>
+# Session 13 (2026-06-30): ใช้ไทยรัฐหาวันงวด + ส่งล่วงหน้า 2 วัน + กันส่งซ้ำ
+
+## หัวข้อ: เลิกพึ่งปฏิทิน lottery-dates.txt เป็นตัวหลัก
+
+**[ผู้ใช้]** ต้องการ: (1) ใช้ไทยรัฐดึงวันงวดถัดไปแทนปฏิทิน (2) ส่งล่วงหน้า 2 วัน (3) กันส่งซ้ำ
+
+## สิ่งที่สร้าง/แก้
+
+### scripts/draw-date.js (ใหม่)
+- Fetch `https://www.thairath.co.th/lottery` → หา `งวดประจำวันที่ D monthname YYYY` ใน HTML
+- ตรวจ XXXXXX เพื่อยืนยันว่าเป็นงวดที่ยังไม่ออก → แปลง พ.ศ. เป็น ค.ศ. → return `YYYY-MM-DD`
+- **Fallback:** ถ้า fetch/parse ล้มเหลว → อ่าน `lottery-dates.txt` หาวันที่ > วันนี้ ICT + log warning
+- อ่าน Firestore `experiment.sent.predictedDraw` เพื่อเช็คว่างวดนี้เคยส่งแล้วหรือยัง
+- ตัดสิน `shouldSend = (days === 2) && !alreadySent` (หรือ `FORCE=true` ข้ามทั้งหมด)
+- เขียน `send` + `drawDate` ลง `$GITHUB_OUTPUT`
+
+### scripts/predict.js (แก้)
+- เพิ่ม `const DRAW_DATE = process.env.DRAW_DATE || null`
+- `initExperiment()` เพิ่ม `sent: { predictedDraw: null, resultsDraw: null }`
+- `newExperiment` เพิ่ม `sent: { ...(experiment.sent || {}), predictedDraw: DRAW_DATE }` กันส่งซ้ำงวดเดิม
+
+### scripts/fetch-results.js (แก้)
+- เพิ่ม `const FORCE = process.env.FORCE === 'true'`
+- guard ซ้ำ: `if (!FORCE && lastRow === newRow)` → `setOutput('send', 'false'); return`
+- หลัง write Firestore สำเร็จ → `setOutput('send', 'true')`
+- `newExperiment.sent.resultsDraw = prizes.drawDateStr` (trace)
+
+### .github/workflows/auto-lottery.yml (แก้)
+- **ลบ** 2 step เก่า (Check calendar predict/results)
+- **predict flow:** เพิ่ม step `decide` (id) รัน `draw-date.js` → gate ด้วย `steps.decide.outputs.send == 'true'`; ส่ง `DRAW_DATE` env เข้า predict.js
+- **results flow:** เพิ่ม `id: results` ให้ fetch-results.js step; gate discord ด้วย `steps.results.outputs.send == 'true'`
+- คง `lottery-dates.txt` ไว้เป็น fallback (ไม่ลบ)
+
+## แหล่งข้อมูล (อัปเดต)
+| งาน | แหล่ง |
+|-----|-------|
+| hints | kapook (เหมือนเดิม) |
+| วันงวดถัดไป | ไทยรัฐ (primary) + lottery-dates.txt (fallback) |
+| ผลรางวัล | myhora (เหมือนเดิม) |
+
+## Logic กันส่งซ้ำ
+- predict: draw-date.js อ่าน `experiment.sent.predictedDraw` → ถ้าตรงกับ nextDraw → skip; predict.js เขียน marker ทับหลังส่ง
+- results: fetch-results.js เช็ค `lastRow === newRow` → ถ้าซ้ำ → `send=false` → discord ไม่รัน
+- `FORCE=true` ข้ามทั้งหมด (สำหรับทดสอบ manual)

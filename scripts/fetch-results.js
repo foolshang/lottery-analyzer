@@ -1,9 +1,14 @@
 // fetch-results.js — ดึงผลจาก myhora → learning → เขียน Firestore (Phase E: record 4 groups)
-import { db, COL, DOC } from './_db.js';
+import { appendFileSync } from 'node:fs';
+import { db, COL, DOC }  from './_db.js';
 import {
   parseAll, adjustWeights, buildComparison, initWeights,
   isStatisticallySignificant,
 } from '../src/engine.js';
+
+function setOutput(name, val) {
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${val}\n`);
+}
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
 
@@ -67,6 +72,7 @@ function initExperiment() {
 }
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const FORCE   = process.env.FORCE === 'true';
 
 async function main() {
   console.log('=== fetch-results.js (Phase E) ===');
@@ -88,7 +94,11 @@ async function main() {
 
   // ป้องกัน duplicate
   const lastRow = rawData.trim().split('\n').pop();
-  if (lastRow === newRow) { console.log('ผลนี้มีในข้อมูลแล้ว — ข้าม'); return; }
+  if (!FORCE && lastRow === newRow) {
+    console.log('ผลนี้มีในข้อมูลแล้ว — ข้าม');
+    setOutput('send', 'false');
+    return;
+  }
 
   const lastPred   = stored.lastPredictions || null;
   const weights    = stored.weights || initWeights();
@@ -155,6 +165,7 @@ async function main() {
     A: newA, B: newB, C: newC, D: newD,
     history: newExpHistory,
     pending: null,
+    sent:    { ...(experiment.sent || {}), resultsDraw: prizes.drawDateStr },
   };
 
   const newData = rawData ? rawData + '\n' + newRow : newRow;
@@ -190,6 +201,7 @@ async function main() {
   }, { merge: true });
 
   console.log(`✓ Firestore อัปเดตแล้ว (hits B=${hitsB}/6, A=${hitsA}, C=${hitsC}, D=${hitsD})`);
+  setOutput('send', 'true');
 
   // แสดง experiment สรุป
   const avgFmt = (s) => s.rounds > 0 ? (s.totalHits / s.rounds).toFixed(2) : '-';
