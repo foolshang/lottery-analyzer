@@ -23,7 +23,8 @@
 13. [Session 11: วิเคราะห์พฤติกรรม hints หลังกด Analyze](#session-11)
 14. [Session 12: discord.js ส่งทำนาย 3 ชุด A/B/C](#session-12)
 15. [Session 13: ใช้ไทยรัฐหาวันงวด + ส่งล่วงหน้า 2 วัน + กันส่งซ้ำ](#session-13)
-16. [สรุประบบทั้งหมด](#สรุประบบ)
+16. [Session 14: เปลี่ยน draw-date.js ใช้ kapook แทนไทยรัฐ](#session-14)
+17. [สรุประบบทั้งหมด](#สรุประบบ)
 17. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
 
 ---
@@ -1166,3 +1167,22 @@ experiment: {
 - predict: draw-date.js อ่าน `experiment.sent.predictedDraw` → ถ้าตรงกับ nextDraw → skip; predict.js เขียน marker ทับหลังส่ง
 - results: fetch-results.js เช็ค `lastRow === newRow` → ถ้าซ้ำ → `send=false` → discord ไม่รัน
 - `FORCE=true` ข้ามทั้งหมด (สำหรับทดสอบ manual)
+
+---
+
+<a name="session-14"></a>
+# Session 14 (2026-06-30): เปลี่ยน draw-date.js ใช้ kapook แทนไทยรัฐ
+
+## ปัญหา: ไทยรัฐ landing แสดงงวดผิด
+
+ทดสอบจริงพบว่า `https://www.thairath.co.th/lottery` แสดงงวดล่าสุดที่ออกไปแล้ว (16 มิ.ย.) แทนที่จะเป็นงวดถัดไป (1 ก.ค.) + คำว่า XXXXXX มีในหน้าเสมอ → ใช้เช็คไม่ได้ → parser อ่านวันผิด → `days` ติดลบ → auto 2 วันล่วงหน้าไม่มีวันยิง + fallback ไม่เด้ง (parse "สำเร็จ" แต่ได้วันผิด)
+
+## แก้: เปลี่ยนมาใช้ kapook
+
+- `getNextDrawDateFromThairath()` → แทนด้วย `getNextDrawDateFromKapook()`
+- Fetch `https://lottery.kapook.com/` → หาลิงก์ `/check/DDMMYY` ทั้งหมด
+- แปลง DDMMYY (YY = พ.ศ. 2 หลักท้าย) → CE ISO; validate วันจริงด้วย `new Date()`
+- เลือกวัน**ใหม่สุด** = งวดถัดไป
+- ทดสอบผล: พบ 13 codes → ได้ `2026-07-01` ถูกต้อง
+- ลบ `MONTH_MAP` + `parseThaiDate` ที่ไม่ใช้แล้ว
+- fallback `lottery-dates.txt` และ `main()` คงเดิมทุกอย่าง
