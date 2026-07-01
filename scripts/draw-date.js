@@ -107,7 +107,7 @@ async function main() {
   }
 
   const alreadySent = sentDraw === nextDraw;
-  const shouldSend  = FORCE ? true : (days === 2 && !alreadySent);
+  const shouldSend  = FORCE ? true : (days === 5 && !alreadySent);
 
   console.log(`วันนี้ ICT      = ${today}`);
   console.log(`งวดถัดไป       = ${nextDraw}`);
