@@ -3,7 +3,6 @@ import { appendFileSync } from 'node:fs';
 import { db, COL, DOC }  from './_db.js';
 import {
   parseAll, adjustWeights, buildComparison, initWeights,
-  isStatisticallySignificant,
 } from '../src/engine.js';
 
 function setOutput(name, val) {
@@ -169,34 +168,17 @@ async function main() {
     if (cmp.back2Result?.win)                 console.log('✓ ท้าย 2 ถูก!');
   }
 
-  // ── Phase E: คำนวณ hits สำหรับทุกกลุ่ม ──
+  // ── คำนวณ hits สำหรับ 3 กลุ่ม A/B/C ──
   const hitsA = countHits(pending.A, prizes.full);
   const hitsB = countHits(pending.B || lastPred, prizes.full);
   const hitsC = countHits(pending.C, prizes.full);
-  const hitsD = countHits(pending.D, prizes.full);
 
-  if (pending.A) console.log(`กลุ่ม A hits: ${hitsA} | B: ${hitsB} | C: ${hitsC} | D: ${hitsD}`);
+  if (pending.A) console.log(`กลุ่ม A hits: ${hitsA} | B: ${hitsB} | C: ${hitsC}`);
 
   // อัปเดต experiment stats
-  const newA = { ...experiment.A, totalHits: (experiment.A?.totalHits || 0) + hitsA, rounds: (experiment.A?.rounds || 0) + (pending.A ? 1 : 0) };
-  const newB = { ...experiment.B, totalHits: (experiment.B?.totalHits || 0) + hitsB, rounds: (experiment.B?.rounds || 0) + (pending.B || lastPred ? 1 : 0) };
-  const newC = { ...experiment.C, totalHits: (experiment.C?.totalHits || 0) + hitsC, rounds: (experiment.C?.rounds || 0) + (pending.C ? 1 : 0) };
-  const newD = { ...experiment.D, totalHits: (experiment.D?.totalHits || 0) + hitsD, rounds: (experiment.D?.rounds || 0) + (pending.D ? 1 : 0) };
-
-  // ตรวจเกณฑ์ปลดล็อก D: 30+ งวด + อย่างน้อย 1 กลุ่มมีนัยสำคัญ
-  const dStatus = experiment.D?.status || 'silent';
-  if (dStatus === 'silent') {
-    const minRounds = Math.min(newA.rounds, newB.rounds, newC.rounds);
-    const sigA = isStatisticallySignificant(newA.totalHits, newA.rounds);
-    const sigB = isStatisticallySignificant(newB.totalHits, newB.rounds);
-    const sigC = isStatisticallySignificant(newC.totalHits, newC.rounds);
-    if (minRounds >= 30 && (sigA || sigB || sigC)) {
-      newD.status     = 'unlocked';
-      newD.unlockedAt = new Date().toISOString();
-      const which = [sigA && 'A', sigB && 'B', sigC && 'C'].filter(Boolean).join('/');
-      console.log(`🔓 กลุ่ม D ปลดล็อกแล้ว! (${minRounds} งวด, กลุ่มที่มีนัยสำคัญ: ${which})`);
-    }
-  }
+  const newA = { totalHits: (experiment.A?.totalHits || 0) + hitsA, rounds: (experiment.A?.rounds || 0) + (pending.A ? 1 : 0) };
+  const newB = { totalHits: (experiment.B?.totalHits || 0) + hitsB, rounds: (experiment.B?.rounds || 0) + (pending.B || lastPred ? 1 : 0) };
+  const newC = { totalHits: (experiment.C?.totalHits || 0) + hitsC, rounds: (experiment.C?.rounds || 0) + (pending.C ? 1 : 0) };
 
   // เพิ่ม experiment history (newest-last)
   const expEntry = {
@@ -204,16 +186,15 @@ async function main() {
     predA: pending.A || null,
     predB: pending.B || lastPred || null,
     predC: pending.C || null,
-    predD: pending.D || null,
     actual: prizes.full,
-    hitsA, hitsB, hitsC, hitsD,
+    hitsA, hitsB, hitsC,
     createdAt: new Date().toISOString(),
   };
   const newExpHistory = [...(experiment.history || []), expEntry].slice(-100);
 
   const newExperiment = {
     ...experiment,
-    A: newA, B: newB, C: newC, D: newD,
+    A: newA, B: newB, C: newC,
     history: newExpHistory,
     pending: null,
     sent:    { ...(experiment.sent || {}), resultsDraw: prizes.drawDateStr },
@@ -252,16 +233,15 @@ async function main() {
     updatedAt:       new Date().toISOString(),
   }, { merge: true });
 
-  console.log(`✓ Firestore อัปเดตแล้ว (hits B=${hitsB}/6, A=${hitsA}, C=${hitsC}, D=${hitsD})`);
+  console.log(`✓ Firestore อัปเดตแล้ว (hits A=${hitsA} | B=${hitsB} | C=${hitsC})`);
   setOutput('send', 'true');
 
   // แสดง experiment สรุป
   const avgFmt = (s) => s.rounds > 0 ? (s.totalHits / s.rounds).toFixed(2) : '-';
   console.log(`\n📊 สรุป experiment (${newB.rounds} งวด):`);
-  console.log(`  A (no hints):   avg ${avgFmt(newA)} (${newA.rounds} งวด)`);
-  console.log(`  B (current):    avg ${avgFmt(newB)} (${newB.rounds} งวด)`);
-  console.log(`  C (hints≥3src): avg ${avgFmt(newC)} (${newC.rounds} งวด)`);
-  console.log(`  D (ensemble):   avg ${avgFmt(newD)} (${newD.rounds} งวด) [${newD.status}]`);
+  console.log(`  A (freq ล้วน)          : avg ${avgFmt(newA)} (${newA.rounds} งวด)`);
+  console.log(`  B (freq+hints รางวัล2-3): avg ${avgFmt(newB)} (${newB.rounds} งวด)`);
+  console.log(`  C (hints รางวัล2-3)    : avg ${avgFmt(newC)} (${newC.rounds} งวด)`);
   console.log(`  baseline = 0.60`);
 }
 
