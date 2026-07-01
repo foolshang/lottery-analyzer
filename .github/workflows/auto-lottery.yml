@@ -50,12 +50,6 @@ jobs:
           FORCE: ${{ github.event.inputs.force }}
         run: node scripts/draw-date.js
 
-      - name: Fetch hints from kapook
-        if: steps.mode.outputs.mode == 'predict' && steps.decide.outputs.send == 'true'
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: node scripts/fetch-hints.js
-
       - name: Run prediction
         if: steps.mode.outputs.mode == 'predict' && steps.decide.outputs.send == 'true'
         env:
