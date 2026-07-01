@@ -14,6 +14,36 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 function thaiYear() { return new Date().getFullYear() + 543; }
 
+// ── helpers สำหรับ parse section-based ──────────────────────────────────────
+function stripHtml(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi,  ' ')
+    .replace(/<[^>]+>/g,   ' ')
+    .replace(/&nbsp;/gi,   ' ')
+    .replace(/\s+/g,       ' ')
+    .trim();
+}
+
+function extractSection(text, startMarkers, endMarkers) {
+  for (const sm of startMarkers) {
+    const si = text.indexOf(sm);
+    if (si === -1) continue;
+    const after = si + sm.length;
+    let ei = text.length;
+    for (const em of endMarkers) {
+      const idx = text.indexOf(em, after);
+      if (idx !== -1 && idx < ei) ei = idx;
+    }
+    return text.slice(after, ei);
+  }
+  return '';
+}
+
+function all6digit(text) {
+  return [...text.matchAll(/(?<!\d)\d{6}(?!\d)/g)].map(m => m[0]);
+}
+
 // ดึงผลล่าสุดจาก myhora
 async function fetchLatestResult() {
   const year = thaiYear();
@@ -51,7 +81,28 @@ async function fetchLatestResult() {
     return dm ? `${dm[1]} ${dm[2]} ${dm[3]}` : `${year}`;
   })();
 
-  return { full, front3, back3, back2, drawDateStr };
+  // ── parse รางวัลที่ 2 (5 ชุด) และ รางวัลที่ 3 (10 ชุด) สำหรับ hintsSource ──
+  const text = stripHtml(html);
+  // anchor จาก "รางวัลที่หนึ่ง" เพื่อให้ได้ข้อมูลของงวดล่าสุด (ไม่ใช่งวดเก่าในหน้ารายปี)
+  const anchorPos = text.indexOf('รางวัลที่หนึ่ง');
+  const textFromPrize1 = anchorPos >= 0 ? text.slice(anchorPos) : text;
+
+  const TAIL_ENDS = ['รางวัลที่ 4', 'รางวัลที่4', 'ตัวเลขสามหลัก',
+    'เลขหน้าสามตัว', 'เลขท้ายสามตัว', 'เลขท้ายสองตัว', 'รางวัลข้างเคียง'];
+
+  const prize2 = all6digit(extractSection(textFromPrize1,
+    ['รางวัลที่ 2', 'รางวัลที่2'],
+    ['รางวัลที่ 3', 'รางวัลที่3', ...TAIL_ENDS]
+  ));
+  const prize3 = all6digit(extractSection(textFromPrize1,
+    ['รางวัลที่ 3', 'รางวัลที่3'],
+    ['รางวัลที่ 4', 'รางวัลที่4', ...TAIL_ENDS.slice(2)]
+  ));
+
+  console.log(`รางวัลที่ 2 (${prize2.length} ชุด): ${prize2.join(', ') || '-'}`);
+  console.log(`รางวัลที่ 3 (${prize3.length} ชุด): ${prize3.slice(0, 3).join(', ')}${prize3.length > 3 ? '...' : ''}`);
+
+  return { full, front3, back3, back2, drawDateStr, prize2, prize3 };
 }
 
 function countHits(pred, actual) {
@@ -197,6 +248,7 @@ async function main() {
     experiment:      newExperiment,
     lastResults:     { prizes: prizesFlat, cmp, drawDate: prizes.drawDateStr, prediction: lastPred },
     lastPredictions: null,
+    hintsSource:     { drawDate: prizes.drawDateStr, prize2: prizes.prize2, prize3: prizes.prize3 },
     updatedAt:       new Date().toISOString(),
   }, { merge: true });
 
