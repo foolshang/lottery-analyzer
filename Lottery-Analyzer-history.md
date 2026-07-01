@@ -24,8 +24,11 @@
 14. [Session 12: discord.js ส่งทำนาย 3 ชุด A/B/C](#session-12)
 15. [Session 13: ใช้ไทยรัฐหาวันงวด + ส่งล่วงหน้า 2 วัน + กันส่งซ้ำ](#session-13)
 16. [Session 14: เปลี่ยน draw-date.js ใช้ kapook แทนไทยรัฐ](#session-14)
-17. [สรุประบบทั้งหมด](#สรุประบบ)
-17. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
+17. [Session 15: สร้าง research/ + fetch-prizes.js + backtest-25.js](#session-15)
+18. [Session 16: backtest-tail.js — bias + ทำนายตำแหน่งรายหลัก](#session-16)
+19. [Session 17: Refactor automation — hints จากรางวัล 2-3, 3 กลุ่ม A/B/C](#session-17)
+20. [สรุประบบทั้งหมด](#สรุประบบ)
+21. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
 
 ---
 
@@ -1255,3 +1258,72 @@ cat research/data/backtest-log.txt # อ่านผล
 - ท้าย 2 ตัว: chi2 = 105.30 (ปกติ ต่ำกว่าวิกฤต 123.225)
 - ทำนายทุกเป้า: z ≤ 1.68 → เสมอสุ่มทั้งหมด (ไม่มีเป้าใดเกิน p<0.05)
 - ผู้ใช้จะนำ log ไปแปลผลเอง (ต้องระวัง multiple-comparison)
+
+---
+
+<a name="session-17"></a>
+# Session 17 (2026-07-01): Refactor automation — hints จากรางวัล 2-3, 3 กลุ่ม A/B/C
+
+## หัวข้อ: เปลี่ยนแหล่ง hints + ยุบกลุ่ม D + ส่งล่วงหน้า 5 วัน
+
+**[ผู้ใช้]** ขอ refactor ระบบอัตโนมัติใน 6 commit steps (บนพื้นฐาน backtest-25.js ที่พิสูจน์ว่า kapook hints z≈0 = ไม่ช่วยทำนายดีกว่าสุ่ม)
+
+**[Claude Code]** ดำเนินการ STEP 1→6 ต่อเนื่อง แต่ละ step commit แยก
+
+## เหตุผลที่เปลี่ยน
+
+- backtest-25.js ทดสอบ 752 คู่: ทุก formula (A/B/C-norm/RAND) ได้ z ≈ 0 → รางวัล 2-5 ทำนายรางวัลที่ 1 งวดถัดไปไม่ได้ดีกว่าสุ่ม
+- kapook hints (ความนิยมนักพนัน) ≈ random → ยุติการดึง
+- เปลี่ยนมาใช้รางวัล 2-3 ของงวดก่อน (15 ชุด 6 หลัก) เป็น hints งวดถัดไป — ทิศทาง: "correlation ภายในงวดเดียวกัน" แทน "cross-draw prediction"
+
+## สิ่งที่เปลี่ยน (6 STEP)
+
+### STEP 1 — fetch-results.js: เพิ่ม parse รางวัล 2-3
+- เพิ่ม helper: `stripHtml()`, `extractSection()`, `all6digit()`
+- parse `รางวัลที่ 2` (5 ชุด) + `รางวัลที่ 3` (10 ชุด) จาก myhora yearly page
+- anchor จาก `รางวัลที่หนึ่ง` เพื่อได้ข้อมูลงวดล่าสุดเสมอ
+- เขียน `hintsSource: { drawDate, prize2: [...], prize3: [...] }` ลง Firestore (merge:true)
+- commit: `feat(results): เก็บรางวัล 2-3 เป็นแหล่ง hints`
+
+### STEP 2 — predict.js: เขียนใหม่ทั้งหมด
+- `const WEIGHTS = { freq: 0.7, hints: 0.3 }` (ปรับได้)
+- อ่าน `hintsSource` จาก Firestore (ไม่ใช้ hints/lockedHints/engine boost เดิม)
+- `buildFreqFromRows(rows)` — ความถี่ prize1 สะสม
+- `buildFreqFromNumbers(prize2+prize3)` — ความถี่จาก 15 ชุด 6 หลัก
+- normalize() → argmax per position
+- **กลุ่ม A**: argmax(freqNorm)
+- **กลุ่ม B**: argmax(0.7×freqNorm + 0.3×hintsNorm)
+- **กลุ่ม C**: argmax(hintsNorm)
+- **fallback**: ถ้าไม่มี hintsSource → B=A, C=A (uniform hints)
+- **auto-reset**: ถ้า experiment มี D → reset เป็นระบบ 3 กลุ่มใหม่ (เก็บ sent marker)
+- commit: `feat(predict): กลุ่ม A/B/C จาก freq + hints(รางวัล2-3) น้ำหนักปรับได้`
+
+### STEP 3 — discord.js: ตัด D, อัปเดต label
+- label ใหม่: A="freq ล้วน", B="freq+hints รางวัล2-3", C="hints รางวัล2-3 ล้วน"
+- สถิติ predict/results แสดงเฉพาะ A/B/C (ไม่มี D)
+- commit: `feat(discord): ส่ง/ตรวจ 3 กลุ่ม A/B/C (ตัด D)`
+
+### STEP 4 — draw-date.js: 2 วัน → 5 วัน
+- `days === 2` → `days === 5`
+- commit: `feat(draw-date): ส่งทำนายล่วงหน้า 5 วัน`
+
+### STEP 5 — auto-lottery.yml: ลบ fetch-hints step
+- ลบ block "Fetch hints from kapook" ออก
+- commit: `refactor(workflow): ตัด fetch-hints (hints มาจากรางวัล 2-3 ใน results)`
+
+### STEP 6 — retire fetch-hints + clean D
+- ลบ `scripts/fetch-hints.js`
+- ลบ hitsD/newD/D logic ออกจาก fetch-results.js
+- ลบ import `isStatisticallySignificant` ที่ไม่ใช้แล้ว
+- commit: `chore: retire fetch-hints + reset experiment สำหรับกลุ่มใหม่`
+
+## Firestore หลัง refactor
+
+- `hintsSource: { drawDate, prize2: string[], prize3: string[] }` — เพิ่มโดย fetch-results
+- `experiment.pending: { A, B, C }` — ไม่มี D
+- `experiment.A/B/C` — stats 3 กลุ่ม (reset อัตโนมัติเมื่อ predict.js ตรวจพบ D ใน format เก่า)
+- `hints` / `lockedHints` fields เก่ายังอยู่ใน Firestore แต่ predict.js ไม่อ่านแล้ว
+
+## กำหนดการส่งอัตโนมัติ (หลัง refactor)
+- งวด 16 ก.ค. → ส่งทำนาย 11 ก.ค. (5 วันล่วงหน้า) ← ครั้งแรกที่ใช้ hintsSource จาก 1 ก.ค.
+- Flow: fetch-results (17:00 หลังงวดออก) → เก็บ prize2-3 → predict (5 วันก่อนงวดถัดไป) → ส่ง Discord
