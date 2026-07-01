@@ -1186,3 +1186,49 @@ experiment: {
 - ทดสอบผล: พบ 13 codes → ได้ `2026-07-01` ถูกต้อง
 - ลบ `MONTH_MAP` + `parseThaiDate` ที่ไม่ใช้แล้ว
 - fallback `lottery-dates.txt` และ `main()` คงเดิมทุกอย่าง
+
+---
+
+<a name="session-15"></a>
+# Session 15 (2026-07-01): Backtest — รางวัล 2-5 ทำนาย รางวัลที่ 1 งวดถัดไป
+
+## หัวข้อ: สร้างโฟลเดอร์ research/ สำหรับทดลอง out-of-sample backtest
+
+**[ผู้ใช้]** ขอทดสอบ: เอาเลขรางวัล 2-5 (6 หลัก) ของงวด N ทำนายรางวัลที่ 1 ของงวด N+1 ได้ดีกว่าสุ่มไหม ครบ 669 งวด (2538-2569 BE)
+
+**[Claude Code]** สร้าง `research/` แยกขาดจากระบบ auto ทั้งหมด — ไม่แตะ scripts/, .github/workflows/, src/, versions/
+
+## สิ่งที่สร้าง
+
+### research/fetch-prizes.js
+- ดึง myhora `result-DD-MM-25YY.aspx` ทีละงวด 2538-2569 BE
+- Parse prize1 (meta description หรือ section ในหน้า) + prize2-5 (section-extraction + 6-digit regex)
+- **Resume อัตโนมัติ:** เซฟทุกครั้งหลังสำเร็จ 1 งวด, ข้ามงวดที่มีแล้ว
+- **Backoff:** retry 30s→60s→120s; พัง 3 ครั้ง → เซฟ + print คำแนะนำ + exit(0)
+- `--smoke`: ดึง 3 งวดล่าสุดเพื่อทดสอบ parse
+
+### research/backtest-25.js
+- อ่านไฟล์ (ไม่ดึงเน็ต) → เรียงตามวันที่ → ทดสอบทุกคู่ N→N+1
+- 5 สูตร: A (freq สะสม), B-count, B-ladder, C-raw, C-norm + RAND control
+- วัดผล: mean/6, sd, z-score vs baseline 0.6, สัดส่วน ≥1 และ ≥3 หลัก
+- เขียน `research/data/backtest-log.txt`
+
+### research/README.md + research/data/.gitkeep
+- อธิบายโฟลเดอร์ + วิธีรัน
+
+## ผล smoke test
+- ดึง 3 งวดล่าสุดจาก myhora สำเร็จ
+- 2569-06-16: prize1=287184 p2=5 p3=10 p4=50 p5=100 ✅ parse ครบ
+- 2569-06-01: prize1=173770 p2=5 p3=10 p4=50 p5=100 ✅ parse ครบ
+- deploy.yml ไม่ trigger จาก research/** ✓ (ไม่อยู่ใน paths)
+
+## วิธีรันของผู้ใช้
+```bash
+node research/fetch-prizes.js      # ดึง ~669 งวด (15-20 นาที, โดนตัดรันซ้ำได้)
+node research/backtest-25.js       # รัน backtest
+cat research/data/backtest-log.txt # อ่านผล
+```
+
+## หมายเหตุ
+- คาดว่าทุกสูตร z ≈ 0 (เสมอสุ่ม) — ยืนยัน "รางวัลทั้งหมดมาจากเครื่องสุ่มเดียวกัน"
+- ถ้าสูตรใด z > ~2 = น่าสนใจ ค่อยต่อยอดเป็นกลุ่ม C ใน experiment
