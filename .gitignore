@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Research backtest data (large file, gen locally)
+research/data/prizes-history.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
