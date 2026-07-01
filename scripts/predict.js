@@ -1,12 +1,55 @@
-// predict.js — อ่าน Firestore → คำนวณทำนาย 4 กลุ่ม (A/B/C/D) → เขียน lastPredictions + experiment.pending
+// predict.js — กลุ่ม A/B/C จาก freq(prize1) + hints(รางวัล 2-3 งวดก่อน)
 import { db, COL, DOC } from './_db.js';
-import {
-  parseAll, initWeights, analyze, analyzeGroupA, analyzeEnsemble,
-  convertHintsToBoost, groupHintsBySourceCount,
-} from '../src/engine.js';
+import { parseAll }     from '../src/engine.js';
 
-const DRY_RUN  = process.argv.includes('--dry-run');
+const DRY_RUN   = process.argv.includes('--dry-run');
 const DRAW_DATE = process.env.DRAW_DATE || null;
+
+// น้ำหนักกลุ่ม B (ปรับได้)
+const WEIGHTS = { freq: 0.7, hints: 0.3 };
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+function buildFreqFromRows(rows) {
+  const freq = Array.from({ length: 6 }, () => Array(10).fill(0));
+  for (const row of rows) {
+    for (let p = 0; p < 6; p++) freq[p][row[p]]++;
+  }
+  return freq;
+}
+
+function buildFreqFromNumbers(numbers) {
+  const freq = Array.from({ length: 6 }, () => Array(10).fill(0));
+  for (const num of numbers) {
+    if (!/^\d{6}$/.test(num)) continue;
+    const d = num.split('').map(Number);
+    for (let p = 0; p < 6; p++) freq[p][d[p]]++;
+  }
+  return freq;
+}
+
+function normalize(freq) {
+  return freq.map(pos => {
+    const total = pos.reduce((s, v) => s + v, 0);
+    return total === 0
+      ? Array(10).fill(0.1)
+      : pos.map(v => v / total);
+  });
+}
+
+function argmaxArr(arr) {
+  let best = 0, bestV = -Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] > bestV) { bestV = arr[i]; best = i; }
+  }
+  return best;
+}
+
+function blendPredict(freqNorm, hintsNorm, wFreq, wHints) {
+  return freqNorm.map((pos, p) =>
+    argmaxArr(pos.map((v, d) => wFreq * v + wHints * hintsNorm[p][d]))
+  );
+}
 
 function initExperiment() {
   return {
@@ -14,70 +57,78 @@ function initExperiment() {
     A: { totalHits: 0, rounds: 0 },
     B: { totalHits: 0, rounds: 0 },
     C: { totalHits: 0, rounds: 0 },
-    D: { totalHits: 0, rounds: 0, status: 'silent', unlockedAt: null },
     history: [],
     pending: null,
     sent:    { predictedDraw: null, resultsDraw: null },
   };
 }
 
+// ─── main ─────────────────────────────────────────────────────────────────────
+
 async function main() {
-  console.log('=== predict.js (Phase E: 4 groups) ===');
+  console.log('=== predict.js (A=freq, B=blend, C=hints รางวัล2-3) ===');
   const ref    = db.collection(COL).doc(DOC);
   const snap   = await ref.get();
   const stored = snap.exists ? snap.data() : {};
 
-  const rows        = parseAll(stored.data || '');
-  const weights     = stored.weights     || initWeights();
-  const hints       = stored.hints       || [];
-  const lockedHints = stored.lockedHints || [];
-  const experiment  = stored.experiment  || initExperiment();
-
-  console.log(`rows: ${rows.length} | hints: ${hints.length} | lockedHints: ${lockedHints.length}`);
+  const rows = parseAll(stored.data || '');
+  console.log(`rows: ${rows.length}`);
   if (rows.length === 0) { console.warn('ไม่มีข้อมูล rows'); return; }
 
-  // ── Group B (current system) ──
-  const { front: activeFront, back: activeBack } = convertHintsToBoost(hints);
-  const { front: lockedFront, back: lockedBack } = convertHintsToBoost(lockedHints);
-  const resB  = analyze(rows, activeFront, activeBack, lockedFront, lockedBack, weights);
-  const predB = [...resB.front, ...resB.back];
+  // reset อัตโนมัติถ้า experiment format เก่า (มีกลุ่ม D = ระบบเก่า)
+  let experiment = stored.experiment || initExperiment();
+  if ('D' in experiment) {
+    console.log('[reset] experiment format เก่า (มีกลุ่ม D) → reset สำหรับ A/B/C ใหม่');
+    experiment = { ...initExperiment(), sent: experiment.sent || {} };
+  }
 
-  // ── Group A (no hints) ──
-  const resA  = analyzeGroupA(rows, weights);
-  const predA = resA ? [...resA.front, ...resA.back] : predB;
+  // ── ความถี่ prize1 สะสมทั้งประวัติ ──
+  const freqTable = buildFreqFromRows(rows);
+  const freqNorm  = normalize(freqTable);
 
-  // ── Group C (hints ≥ 3 sources) ──
-  const hintCounts = groupHintsBySourceCount(hints);
-  const hintsC3    = hintCounts
-    .filter((h) => h.count >= 3)
-    .flatMap((h) => Array(h.count).fill({ front: h.front, back: h.back }));
-  const { front: activeFrontC, back: activeBackC } = convertHintsToBoost(hintsC3);
-  const resC  = analyze(rows, activeFrontC, activeBackC, lockedFront, lockedBack, weights);
-  const predC = [...resC.front, ...resC.back];
+  // ── hints จาก hintsSource (รางวัล 2-3 ของงวดที่เพิ่งออก) ──
+  const hintsSource = stored.hintsSource || null;
+  let hintsNorm;
+  let hintsAvailable = false;
 
-  // ── Group D (ensemble, weighted by cumulative hits) ──
-  const statsA = experiment.A || { totalHits: 0, rounds: 0 };
-  const statsB = experiment.B || { totalHits: 0, rounds: 0 };
-  const statsC = experiment.C || { totalHits: 0, rounds: 0 };
-  const predD  = analyzeEnsemble(predA, predB, predC, statsA, statsB, statsC) || predB;
+  if (hintsSource?.prize2?.length > 0 || hintsSource?.prize3?.length > 0) {
+    const allNums    = [...(hintsSource.prize2 || []), ...(hintsSource.prize3 || [])];
+    const hintsTable = buildFreqFromNumbers(allNums);
+    hintsNorm        = normalize(hintsTable);
+    hintsAvailable   = true;
+    console.log(`hintsSource งวด ${hintsSource.drawDate}: prize2=${hintsSource.prize2?.length || 0} prize3=${hintsSource.prize3?.length || 0} (รวม ${allNums.length} ชุด)`);
+  } else {
+    hintsNorm = Array.from({ length: 6 }, () => Array(10).fill(0.1));
+    console.warn('[warning] ไม่มี hintsSource — ใช้ uniform fallback (B≈A, C=predA)');
+  }
 
-  console.log('กลุ่ม A (no hints)    :', predA.join(''), `(${predA.slice(0,3).join('')}-${predA.slice(3).join('')})`);
-  console.log('กลุ่ม B (current)     :', predB.join(''), `(${predB.slice(0,3).join('')}-${predB.slice(3).join('')})`);
-  console.log('กลุ่ม C (hints ≥3src) :', predC.join(''), `(${predC.slice(0,3).join('')}-${predC.slice(3).join('')})`);
-  console.log('กลุ่ม D (ensemble)    :', predD.join(''), `(${predD.slice(0,3).join('')}-${predD.slice(3).join('')})`,
-    `[${experiment.D?.status || 'silent'}]`);
-  console.log(`  D = weighted vote (wA=${statsA.rounds>0?(statsA.totalHits/statsA.rounds).toFixed(2):'0.10'} wB=${statsB.rounds>0?(statsB.totalHits/statsB.rounds).toFixed(2):'0.10'} wC=${statsC.rounds>0?(statsC.totalHits/statsC.rounds).toFixed(2):'0.10'})`);
+  // ── 3 กลุ่ม ──
+  const predA = freqNorm.map(pos => argmaxArr(pos));
+
+  const predB = hintsAvailable
+    ? blendPredict(freqNorm, hintsNorm, WEIGHTS.freq, WEIGHTS.hints)
+    : [...predA];
+
+  const predC = hintsAvailable
+    ? hintsNorm.map(pos => argmaxArr(pos))
+    : [...predA];
+
+  const fmt = arr => `${arr.slice(0, 3).join('')}-${arr.slice(3).join('')}`;
+  console.log(`กลุ่ม A (freq ล้วน)                   : ${fmt(predA)}`);
+  console.log(`กลุ่ม B (${WEIGHTS.freq}×freq + ${WEIGHTS.hints}×hints รางวัล2-3): ${fmt(predB)}`);
+  console.log(`กลุ่ม C (hints รางวัล2-3 ล้วน)        : ${fmt(predC)}`);
+  if (!hintsAvailable) console.log('[fallback] B=A, C=A');
 
   if (DRY_RUN) { console.log('[dry-run] ไม่เขียน Firestore'); return; }
 
   const newExperiment = {
     ...experiment,
-    pending: { A: predA, B: predB, C: predC, D: predD },
+    pending: { A: predA, B: predB, C: predC },
     sent:    { ...(experiment.sent || {}), predictedDraw: DRAW_DATE },
   };
 
   await ref.set({
-    lastPredictions: predB,  // keep existing field for web app
+    lastPredictions: predB,
     lastResults:     null,
     experiment:      newExperiment,
     updatedAt:       new Date().toISOString(),
