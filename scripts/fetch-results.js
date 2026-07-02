@@ -43,6 +43,21 @@ function all6digit(text) {
   return [...text.matchAll(/(?<!\d)\d{6}(?!\d)/g)].map(m => m[0]);
 }
 
+const THAI_MONTHS_FULL = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
+];
+
+// หา href ล่าสุดก่อนจุด anchor รูปแบบ result-DD-MM-25YY.aspx (ตรงกับงวดล่าสุดบนหน้ารายปีเสมอ)
+// เชื่อถือได้กว่าการ parse ข้อความไทย เพราะหน้ารายปีใช้ชื่อเดือนเต็ม ("กรกฎาคม") ไม่ใช่ตัวย่อ
+function findLatestDrawUrlParts(html, anchorIdx) {
+  const before  = html.slice(0, anchorIdx);
+  const matches = [...before.matchAll(/result-(\d{2})-(\d{2})-(\d{4})\.aspx/g)];
+  if (matches.length === 0) return null;
+  const [, dd, mm, yyyy] = matches[matches.length - 1];
+  return { dd, mm, yyyy };
+}
+
 // ดึงผลล่าสุดจาก myhora
 async function fetchLatestResult() {
   const year = thaiYear();
@@ -74,29 +89,46 @@ async function fetchLatestResult() {
   const b2m = html.match(/เลขท้าย\s*2\s*ตัว[\s\S]{1,300}?\b(\d{2})\b/);
   if (b2m) back2 = b2m[1].split('').map(Number);
 
-  const drawDateStr = (() => {
-    const before = html.slice(0, html.indexOf('รางวัลที่หนึ่ง'));
-    const dm = before.match(/(\d{1,2})\s*(ม\.?ค\.?|ก\.?พ\.?|มี\.?ค\.?|เม\.?ย\.?|พ\.?ค\.?|มิ\.?ย\.?|ก\.?ค\.?|ส\.?ค\.?|ก\.?ย\.?|ต\.?ค\.?|พ\.?ย\.?|ธ\.?ค\.?)\s*(\d{4})/);
-    return dm ? `${dm[1]} ${dm[2]} ${dm[3]}` : `${year}`;
-  })();
+  const anchorIdx = html.indexOf('รางวัลที่หนึ่ง');
+  const urlParts  = findLatestDrawUrlParts(html, anchorIdx);
+  const drawDateStr = urlParts
+    ? `${parseInt(urlParts.dd, 10)} ${THAI_MONTHS_FULL[parseInt(urlParts.mm, 10) - 1]} ${urlParts.yyyy}`
+    : `${year}`;
 
-  // ── parse รางวัลที่ 2 (5 ชุด) และ รางวัลที่ 3 (10 ชุด) สำหรับ hintsSource ──
-  const text = stripHtml(html);
-  // anchor จาก "รางวัลที่หนึ่ง" เพื่อให้ได้ข้อมูลของงวดล่าสุด (ไม่ใช่งวดเก่าในหน้ารายปี)
-  const anchorPos = text.indexOf('รางวัลที่หนึ่ง');
-  const textFromPrize1 = anchorPos >= 0 ? text.slice(anchorPos) : text;
+  // ── parse รางวัลที่ 2 (5 ชุด) และ รางวัลที่ 3 (10 ชุด) จากหน้าต่องวด ──
+  // (หน้ารายปี result-YYYY.aspx มีแค่รางวัลที่ 1 — รางวัล 2-3 ต้องดึงจากหน้า result-DD-MM-25YY.aspx)
+  let prize2 = [];
+  let prize3 = [];
 
-  const TAIL_ENDS = ['รางวัลที่ 4', 'รางวัลที่4', 'ตัวเลขสามหลัก',
-    'เลขหน้าสามตัว', 'เลขท้ายสามตัว', 'เลขท้ายสองตัว', 'รางวัลข้างเคียง'];
+  if (urlParts) {
+    const drawUrl = `https://myhora.com/lottery/result-${urlParts.dd}-${urlParts.mm}-${urlParts.yyyy}.aspx`;
+    console.log(`Fetching ${drawUrl} (สำหรับรางวัลที่ 2-3)`);
+    try {
+      const drawRes = await fetch(drawUrl, { headers: { 'User-Agent': UA } });
+      if (!drawRes.ok) throw new Error(`HTTP ${drawRes.status}`);
+      const drawText = stripHtml(await drawRes.text());
 
-  const prize2 = all6digit(extractSection(textFromPrize1,
-    ['รางวัลที่ 2', 'รางวัลที่2'],
-    ['รางวัลที่ 3', 'รางวัลที่3', ...TAIL_ENDS]
-  ));
-  const prize3 = all6digit(extractSection(textFromPrize1,
-    ['รางวัลที่ 3', 'รางวัลที่3'],
-    ['รางวัลที่ 4', 'รางวัลที่4', ...TAIL_ENDS.slice(2)]
-  ));
+      const TAIL_ENDS = ['รางวัลที่ 4', 'รางวัลที่4', 'ตัวเลขสามหลัก',
+        'เลขหน้าสามตัว', 'เลขท้ายสามตัว', 'เลขท้ายสองตัว', 'รางวัลข้างเคียง'];
+
+      prize2 = all6digit(extractSection(drawText,
+        ['รางวัลที่ 2', 'รางวัลที่2'],
+        ['รางวัลที่ 3', 'รางวัลที่3', ...TAIL_ENDS]
+      ));
+      prize3 = all6digit(extractSection(drawText,
+        ['รางวัลที่ 3', 'รางวัลที่3'],
+        ['รางวัลที่ 4', 'รางวัลที่4', ...TAIL_ENDS.slice(2)]
+      ));
+    } catch (e) {
+      console.warn(`⚠ ดึงหน้าต่องวด (${drawUrl}) ล้มเหลว: ${e.message}`);
+    }
+  } else {
+    console.warn('⚠ แปลงวันงวดเป็น URL ไม่ได้ (parse วันที่จากหน้ารายปีล้มเหลว) — ข้ามการดึงรางวัลที่ 2-3');
+  }
+
+  if (prize2.length === 0 && prize3.length === 0) {
+    console.warn('⚠ ดึงหน้าต่องวดแล้วแต่ยังไม่พบรางวัลที่ 2-3 (hintsSource จะว่าง — ตรวจโครงสร้างหน้า myhora)');
+  }
 
   console.log(`รางวัลที่ 2 (${prize2.length} ชุด): ${prize2.join(', ') || '-'}`);
   console.log(`รางวัลที่ 3 (${prize3.length} ชุด): ${prize3.slice(0, 3).join(', ')}${prize3.length > 3 ? '...' : ''}`);
