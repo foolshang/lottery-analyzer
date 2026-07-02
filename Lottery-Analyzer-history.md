@@ -27,7 +27,8 @@
 17. [Session 15: สร้าง research/ + fetch-prizes.js + backtest-25.js](#session-15)
 18. [Session 16: backtest-tail.js — bias + ทำนายตำแหน่งรายหลัก](#session-16)
 19. [Session 17: Refactor automation — hints จากรางวัล 2-3, 3 กลุ่ม A/B/C](#session-17)
-20. [สรุประบบทั้งหมด](#สรุประบบ)
+20. [Session 18: แก้ fetch-results ดึงรางวัล 2-3 ผิดหน้า + digit-overlap backtest](#session-18)
+21. [สรุประบบทั้งหมด](#สรุประบบ)
 21. [บทเรียน/ปัญหาที่เคยเจอ](#บทเรียน)
 
 ---
@@ -1327,3 +1328,65 @@ cat research/data/backtest-log.txt # อ่านผล
 ## กำหนดการส่งอัตโนมัติ (หลัง refactor)
 - งวด 16 ก.ค. → ส่งทำนาย 11 ก.ค. (5 วันล่วงหน้า) ← ครั้งแรกที่ใช้ hintsSource จาก 1 ก.ค.
 - Flow: fetch-results (17:00 หลังงวดออก) → เก็บ prize2-3 → predict (5 วันก่อนงวดถัดไป) → ส่ง Discord
+
+---
+
+<a name="session-18"></a>
+# Session 18 (2026-07-02): แก้ fetch-results ดึงรางวัล 2-3 ผิดหน้า + digit-overlap backtest
+
+## หัวข้อ: บั๊ก hintsSource ว่างเสมอ + cosmetic + research ต่อยอด
+
+**[ผู้ใช้]** ส่งคำสั่งตรงจาก Claude Code (3 งาน commit แยก): แก้บั๊ก fetch-results, แก้ชื่อ step ค้าง, เพิ่ม backtest วัด digit-overlap
+
+## งาน 1 (บั๊ก) — fetch-results ดึงรางวัล 2-3 ผิดหน้า
+
+**สาเหตุ:** `scripts/fetch-results.js` ดึงรางวัล 2-3 จากหน้ารายปี `result-YYYY.aspx` ซึ่งมีแค่รางวัลที่ 1 → `prize2`/`prize3` ว่างเสมอ → `hintsSource` ว่าง → predict.js ได้ 3 ชุด A/B/C เหมือนกันหมด (fallback ใช้ freq ล้วน)
+
+**พบเพิ่ม:** regex เดิมที่ parse `drawDateStr` จากข้อความไทย (`ม\.?ค\.?|ก\.?พ\.?|...`) พังอยู่แล้วตั้งแต่แรก เพราะหน้ารายปี myhora ใช้ **ชื่อเดือนเต็ม** ("กรกฎาคม") ไม่ใช่ตัวย่อที่ regex รองรับ → `dm` เป็น `null` เสมอ
+
+**แก้:**
+- เปลี่ยนมาหาวันงวดจาก **href ลิงก์** `result-DD-MM-25YY.aspx` ที่อยู่ก่อน anchor "รางวัลที่หนึ่ง" แรกในหน้า (เชื่อถือได้กว่า parse ข้อความไทย, แนวทางเดียวกับ `research/fetch-prizes.js`)
+- fetch หน้าต่องวด `https://myhora.com/lottery/result-DD-MM-25YY.aspx` แยกต่างหาก
+- parse รางวัลที่ 2 (5 ชุด) + รางวัลที่ 3 (10 ชุด) จากหน้านั้นด้วย section-parser เดิม (`extractSection` + `all6digit`)
+- เพิ่ม `console.warn` ชัดเจนถ้าแปลง URL ไม่ได้ หรือ parse แล้วยังว่าง
+- `drawDateStr` ใช้ชื่อเดือนเต็มไทย (THAI_MONTHS_FULL) แทน แสดงผลถูกต้องแล้ว
+- ทดสอบ fetch จริง 1 งวด (1 ก.ค. 2569): ได้ prize2 = 5 ชุด, prize3 = 10 ชุด ✅ (ก่อนแก้ = 0 ชุดทั้งคู่)
+- commit: `fix(results): ดึงรางวัล 2-3 จากหน้าต่องวด (หน้ารายปีมีแค่รางวัลที่ 1)`
+
+## งาน 2 (cosmetic) — ชื่อ step ค้าง
+
+**[ผู้ใช้]** ชื่อ step ใน `.github/workflows/auto-lottery.yml` ยังเขียนว่า "Thairath + 2-day window" ทั้งที่โค้ด (`draw-date.js`) เปลี่ยนเป็น kapook + 5 วันตั้งแต่ Session 13-14/17
+- แก้ชื่อ step → `Decide predict (kapook + 5-day window + dedup)`
+- commit: `docs(workflow): แก้ชื่อ step ให้ตรงโค้ด (kapook + 5-day)`
+
+## งาน 3 (research) — วัด digit-overlap แยกจาก positional
+
+**เป้าหมาย:** ดูว่าเวลาทายพลาดตำแหน่ง (positional match) เรา "เลือกเลขโดดถูก" มากแค่ไหน (สูงพอต่อยอดไหม)
+
+**สร้าง `research/backtest-overlap.js`** (อ่าน `research/data/prizes-history.json` เดิม ไม่ดึงเน็ต) — สำหรับทุกคู่งวด N→N+1 (ทำนายรางวัลที่ 1 ด้วย freq สะสม เหมือน Formula A ใน backtest-25.js):
+1. **Positional match** — ตรงตำแหน่งกี่หลัก/6 (baseline 0.6)
+2. **Digit-set overlap** — multiset intersection ระหว่างเลขทาย 6 ตัวกับผลจริง 6 ตัว ไม่สนตำแหน่ง (0-6)
+3. **RAND control** เป็นเส้นฐานเชิงประจักษ์ของ digit-overlap (ไม่มีสูตรวิเคราะห์ตรงๆ เพราะ joint distribution ของ multiset ซับซ้อน)
+4. **Paired z-test** (freq overlap − RAND overlap ต่องวดเดียวกัน) — คุมความแปรปรวนระหว่างงวด
+5. รายงาน % เคส "ทายตำแหน่งถูก 0 หลัก แต่ overlap ≥3" (เคสที่ 'เลือกเลขถูกแต่วางผิด')
+
+**ผลจาก 752 คู่ทดสอบ:**
+- Positional (freq): mean 0.6104, z=0.384 — เสมอสุ่ม
+- Digit-overlap (freq): mean 2.4122 vs RAND baseline mean 2.3630
+- **Paired z-test = 0.975** — ไม่มีนัยสำคัญ (< 1.96) → digit-overlap ก็ไม่ต่างจากสุ่ม
+- เคส "ตำแหน่งถูก 0 แต่ overlap≥3" = 139/752 (18.5%) — เป็นสัดส่วนที่คาดจากการสุ่มปกติ ไม่ใช่สัญญาณ
+- **สรุป: ต่อยอดไม่คุ้ม** — สอดคล้องกับ backtest-25.js และ backtest-tail.js ว่าลอตเตอรี่สุ่มจริง ไม่มีความสัมพันธ์ระหว่างรางวัล 2-5 กับรางวัลที่ 1 งวดถัดไป ไม่ว่าจะวัดแบบตำแหน่งเป๊ะหรือแบบเลขโดดล้วน
+- commit: `feat(research): วัด digit-overlap แยกจาก positional`
+
+## สิ่งที่ผู้ใช้ต้องทำเอง (เมื่อสะดวก)
+1. force run **results** (mode=results, force=true) → เช็ค log "รางวัลที่ 2 (5 ชุด)" ไม่ใช่ 0
+2. force run **predict** → เช็คว่า 3 ชุด A/B/C ต่างกันแล้ว (ก่อนแก้ 3 ชุดเหมือนกันหมดเพราะ hintsSource ว่าง)
+3. ผลจาก `node research/backtest-overlap.js` สรุปแล้วว่าไม่มีสัญญาณเพิ่มเติมให้ต่อยอด
+
+## ไฟล์ที่เปลี่ยน Session 18
+| ไฟล์ | การเปลี่ยนแปลง |
+|------|----------------|
+| `scripts/fetch-results.js` | แก้ดึงรางวัล 2-3 จากหน้าต่องวดแทนหน้ารายปี + แก้ parse drawDateStr |
+| `.github/workflows/auto-lottery.yml` | แก้ชื่อ step ให้ตรงโค้ด |
+| `research/backtest-overlap.js` | ใหม่ — วัด digit-overlap vs positional match |
+| `research/data/backtest-overlap-log.txt` | ใหม่ — ผลลัพธ์ backtest |
