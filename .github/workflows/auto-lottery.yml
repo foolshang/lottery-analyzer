@@ -42,7 +42,7 @@ jobs:
           fi
 
       # ── PREDICT FLOW ──────────────────────────────────────────────────────
-      - name: Decide predict (Thairath + 2-day window + dedup)
+      - name: Decide predict (kapook + 5-day window + dedup)
         id: decide
         if: steps.mode.outputs.mode == 'predict'
         env:
